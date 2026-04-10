@@ -22,7 +22,7 @@
 | 🤖 **多模型支持** | 统一的 OpenAI 兼容接口，支持阿里百炼、Ollama、Azure 等任意兼容服务 |
 | 🔧 **工具调用循环** | Agent Loop 机制，LLM 可自主决定调用哪些工具、调用多少轮 |
 | 🔒 **分层安全** | 三级危险等级（safe/confirm/dangerous）+ 路径限制 + 命令拦截 + 审计日志 |
-| 🧠 **持久记忆** | 跨会话记忆系统，自动提取、分层管理（工作/近期/长期/归档） |
+| 🧠 **V4 持久记忆** | 分层记忆架构（L0-L4），Agent 驱动的自主探索模式，状态与历史分离 |
 | 📏 **智能上下文** | 自动检测并压缩长对话，适配不同模型的 token 限制 |
 | 🔌 **插件扩展** | 用户可通过编写 Python 文件自定义工具，支持热重载 |
 | 🌐 **Web UI** | FastAPI + WebSocket 构建的现代化 Web 界面，实时流式输出 |
@@ -77,13 +77,19 @@ Zclaw/
 │   │   ├── permission.py            # 权限管理
 │   │   ├── validator.py             # 输入/输出校验
 │   │   └── audit.py                 # 审计日志
-│   ├── memory/                      # 记忆模块
-│   │   ├── types.py                 # 数据类型
-│   │   ├── store.py                 # JSON 存储
-│   │   ├── retriever.py             # 加权检索
-│   │   ├── manager.py              # 记忆管理器
-│   │   ├── extractor.py            # 自动提取
-│   │   └── lifecycle.py            # 生命周期管理
+│   ├── memory/                      # V4 记忆模块
+│   │   ├── config.py                # V4 配置
+│   │   ├── coordinator.py           # 记忆协调器
+│   │   ├── extractor.py            # LLM 提取器
+│   │   ├── layers/                 # 分层实现
+│   │   │   ├── l0_perceptual.py   # RingBuffer
+│   │   │   ├── l1_working.py      # 会话快照
+│   │   │   ├── l2_episodic.py     # SQLite-VSS 向量存储
+│   │   │   ├── l3_semantic.py     # JSON 当前状态
+│   │   │   └── l4_procedural.py   # YAML 规则
+│   │   └── tools/                  # 记忆工具
+│   │       ├── episodic_search.py   # 搜索历史工具
+│   │       └── memory_tools.py     # 更新记忆工具
 │   ├── context/                     # 上下文管理
 │   │   ├── budget.py               # Token 预算
 │   │   ├── compressor.py           # 对话压缩
@@ -162,7 +168,7 @@ python -m src.web.server
 
 ## 🛠️ 工具清单
 
-Zclaw 内置 **24 个工具**，分为 5 大类：
+Zclaw 内置 **28 个工具**，分为 6 大类：
 
 ### 📁 文件工具（8 个）
 
@@ -212,6 +218,15 @@ Zclaw 内置 **24 个工具**，分为 5 大类：
 | `symbol_find` | safe | 按名称查找符号定义 |
 | `symbol_edit` | confirm | 按符号名称精确替换函数/类 |
 | `import_analyze` | safe | 导入依赖分析 + 未使用检测 |
+
+### 🧠 记忆工具（4 个）
+
+| 工具 | 危险等级 | 功能 |
+|------|---------|------|
+| `search_conversation_history` | safe | 搜索历史对话记录（跨会话） |
+| `get_session_history` | safe | 获取特定会话的完整历史 |
+| `update_memory` | safe | 更新用户/项目的持久化记忆 |
+| `set_preference` | safe | 设置单个用户偏好 |
 
 ## ⌨️ CLI 命令
 

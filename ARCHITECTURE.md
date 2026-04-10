@@ -1,7 +1,7 @@
 # Zclaw 项目完整技术文档
 
-> 版本: 0.3.0 | 最后更新: 2026-04-07  
-> 测试状态: P0-P7 全部完成，**44/44 测试通过**
+> 版本: 0.4.0 | 最后更新: 2026-04-10  
+> 测试状态: V4 Memory Module **4/4 测试通过**
 
 ---
 
@@ -39,7 +39,7 @@ Zclaw 是一个用 Python 编写的 **Claude Code 风格 AI 编程助手**。它
 | **多模型支持** | 统一的 OpenAI 兼容接口，支持阿里百炼、本地 Ollama 等任意兼容服务 |
 | **工具调用循环** | Agent Loop 机制，LLM 可自主决定调用哪些工具、调用多少轮 |
 | **分层安全** | 三级危险等级（safe/confirm/dangerous）+ 路径限制 + 命令拦截 + 用户确认 |
-| **持久记忆** | 跨会话记忆系统，记住用户偏好、项目知识 |
+| **V4 持久记忆** | 五层分层架构，Agent 驱动的自主探索，状态与历史分离 |
 | **智能上下文** | 自动检测并压缩长对话，适配不同模型的 token 限制 |
 | **插件扩展** | 用户可通过编写 Python 文件自定义工具 |
 | **完整 CLI** | Rich 渲染的终端交互界面，支持 REPL 模式和单次命令模式 |
@@ -95,11 +95,19 @@ Zclaw/
 │   │   ├── permission.py         # 权限管理器
 │   │   ├── validator.py          # 输入校验 + 输出清洗
 │   │   └── audit.py              # 审计日志
-│   ├── memory/                   # 记忆模块
-│   │   ├── types.py              # 记忆数据类型
-│   │   ├── store.py              # 持久化存储（JSON）
-│   │   ├── retriever.py          # 检索器（时序衰减）
-│   │   └── manager.py            # 记忆管理器
+│   ├── memory/                   # V4 记忆模块
+│   │   ├── config.py             # V4 配置类
+│   │   ├── coordinator.py         # 记忆协调器
+│   │   ├── extractor.py          # LLM 提取器
+│   │   ├── layers/              # 分层实现
+│   │   │   ├── l0_perceptual.py # RingBuffer
+│   │   │   ├── l1_working.py    # 会话快照
+│   │   │   ├── l2_episodic.py  # SQLite-VSS
+│   │   │   ├── l3_semantic.py   # JSON 当前状态
+│   │   │   └── l4_procedural.py # YAML 规则
+│   │   └── tools/               # 记忆工具
+│   │       ├── episodic_search.py # 搜索历史
+│   │       └── memory_tools.py   # 更新记忆
 │   ├── context/                  # 上下文管理
 │   │   ├── budget.py             # Token 预算计算
 │   │   ├── compressor.py         # 对话历史压缩
@@ -561,68 +569,127 @@ cache.put(tool_name, args, result)  # 写入
 
 ---
 
-### 3.7 记忆模块 (memory)
+### 3.7 记忆模块 V4 (memory)
 
-#### 3.7.1 数据类型 (`types.py`)
+#### 3.7.1 核心设计理念
+
+V4 架构从**"系统驱动的 RAG"**转变为**"Agent 驱动的自主探索"**：
+
+- **状态与记忆分离**: 身份、偏好等全局状态是"活"的当前值，只保留最新态，强制注入；而历史对话是不可变的"档案"，按需探索
+- **极简上下文**: System Prompt 只注入绝对必要的当前状态和硬性规则，将上下文窗口留给 Agent 推理
+- **工具化访问**: L2 历史记忆通过工具暴露，Agent 自主规划何时查询
+
+#### 3.7.2 五层架构
+
+```
+┌────────────────────────────────────────────────────────────────┐
+│                      L0: 感知缓冲 Perceptual Buffer            │
+│  生命周期: 单轮    | 存储: 内存 RingBuffer     | 用途: 原始输入暂存  │
+├────────────────────────────────────────────────────────────────┤
+│                      L1: 工作记忆 Working Memory                │
+│  生命周期: 会话级  | 存储: 内存 + 会话快照文件  | 用途: 当前任务上下文  │
+├────────────────────────────────────────────────────────────────┤
+│                      L2: 情景记忆 Episodic Memory (工具化)       │
+│  生命周期: 永久    | 存储: SQLite + 向量索引     | 用途: 历史对话档案  │
+├────────────────────────────────────────────────────────────────┤
+│                      L3: 语义与状态记忆 Semantic & State         │
+│  生命周期: 永久    | 存储: 结构化JSON           | 用途: 项目知识与当前态│
+├────────────────────────────────────────────────────────────────┤
+│                      L4: 过程记忆 Procedural Memory              │
+│  生命周期: 永久    | 存储: YAML规则文件          | 用途: 行为宪法与规程│
+└────────────────────────────────────────────────────────────────┘
+```
+
+#### 3.7.3 各层详解
+
+**L0: PerceptualBuffer** (`layers/l0_perceptual.py`)
+- RingBuffer 实现，`deque(maxlen=N)`
+- 每轮对话捕获原始输入/输出
+- Agent 不自动检索，通过工具按需访问
+
+**L1: WorkingMemory** (`layers/l1_working.py`)
+- 会话快照：`task_description`, `active_files`, `pending_goals`, `completed_goals`
+- JSON 文件存储在 `.memory/L1_working/sessions/{session_id}.json`
+- 不跨会话持久化
+
+**L2: EpisodicMemory** (`layers/l2_episodic.py`)
+- 不可变档案，仅 `append()` 无 `update()`
+- SQLite 时间线索引 + sqlite-vss 向量索引
+- Schema: `episodes(id, session_id, timestamp, role, content, summary, tool_calls)`
+- `search()`: 文本过滤 + 向量相似度混合搜索
+- `get_session_history()`: 获取特定会话历史
+
+**L3: SemanticMemory** (`layers/l3_semantic.py`)
+- 仅存储当前状态，覆盖写入，无历史
+- `UserProfile`: name, preferences, preferred_language, preferred_code_style
+- `ProjectProfile`: tech_stack, architecture, conventions
+- `format_for_system_prompt()`: 格式化注入文本
+
+**L4: ProceduralMemory** (`layers/l4_procedural.py`)
+- YAML 规则文件，`global_rules.yaml` + `project_rules.yaml`
+- 永不自动修改，仅手动编辑
+- `format_for_system_prompt()`: 格式化为规则文本
+
+#### 3.7.4 记忆协调器 (`coordinator.py`)
+
+`MemoryCoordinator` 统一协调各层：
 
 ```python
-class MemoryType(str, Enum):
-    FACT       # 事实性知识（项目使用 Python 3.12）
-    EPISODE    # 事件记忆（用户让我修复了 bug X）
-    PREFERENCE # 用户偏好（用户喜欢用 TypeScript）
-    SKILL      # Agent 技能（学会了某 API 的用法）
+# 各层访问
+memoryCoordinator.semantic     # L3 当前状态
+memoryCoordinator.procedural  # L4 规则
+memoryCoordinator.perceptual  # L0 RingBuffer
+memoryCoordinator.working     # L1 会话快照
+memoryCoordinator.episodic    # L2 历史档案
 
-@dataclass Memory:
-    id: str                          # UUID 短 ID
-    type: MemoryType
-    content: str                     # 记忆内容
-    tags: list[str]                  # 标签（用于检索）
-    importance: float                # 重要性 0.0~1.0
-    access_count: int                # 访问计数
-    created_at / updated_at / last_accessed: str  # 时间戳
+# 系统提示词构建 (L4 + L3 + L1)
+context = memoryCoordinator.build_system_prompt_context()
 ```
 
-`touch()` 方法更新 access_count 和 last_accessed。
+#### 3.7.5 记忆工具
 
-#### 3.7.2 持久化存储 (`store.py`)
+**search_conversation_history** (`tools/episodic_search.py`)
+- 搜索历史对话，Agent 主动调用而非系统自动注入
+- 参数: `query`, `session_id` (optional), `limit`
 
-`MemoryStore` 使用 JSON 文件存储：
+**get_session_history** (`tools/episodic_search.py`)
+- 获取特定会话的完整历史
+
+**update_memory** (`tools/memory_tools.py`)
+- 更新 L3 持久化记忆（用户/项目）
+- 参数: `category` ("user"|"project"), `data` (object)
+
+**set_preference** (`tools/memory_tools.py`)
+- 设置单个用户偏好键值对
+
+#### 3.7.6 LLMExtractor 适配
+
+提取器接口保持不变，内部逻辑分发到各层：
 
 ```
-~/.Zclaw/memory/memories.json
+if type == "preference":
+    semantic.set_preference(key, value)
+elif type == "fact":
+    working.add_extracted_fact(content)
+elif type == "episode":
+    episodic.archive_turn(role="extracted", content=content)
 ```
 
-支持完整的 CRUD：`add()`, `get()`, `update()`, `delete()`, `list_all()`, `search()`, `clear()`。
-
-搜索使用简单的关键词匹配 + 标签匹配 + 类型匹配评分。
-
-#### 3.7.3 检索器 (`retriever.py`)
-
-`MemoryRetriever` 实现加权检索：
+#### 3.7.7 存储结构
 
 ```
-最终得分 = 相关性×0.4 + 时序衰减×0.2 + 重要性×0.2 + 访问频率×0.2
+.memory/
+├── L1_working/
+│   └── sessions/*.json        # 会话快照
+├── L2_episodic/
+│   └── timeline.db            # SQLite: 时间线 + 向量索引
+├── L3_semantic/
+│   ├── user_profile.json      # 用户当前状态
+│   └── project_profile.json   # 项目当前状态
+└── L4_procedural/
+    ├── global_rules.yaml      # 全局规则
+    └── project_rules.yaml     # 项目规则
 ```
-
-- **相关性**: 查询分词后匹配 content 和 tags
-- **时序衰减**: 指数衰减 `exp(-0.1 × age_days)`，半衰期约 7 天
-- **重要性**: 直接使用 `importance` 字段
-- **访问频率**: `min(access_count / 10, 1.0)`
-
-`format_for_context()` 将检索结果格式化为可注入 system prompt 的文本。
-
-#### 3.7.4 管理器 (`manager.py`)
-
-`MemoryManager` 提供高层 API：
-
-```python
-memory_manager.remember("用户偏好暗色主题", mem_type="preference", tags=["ui"])
-memory_manager.recall("主题", limit=5)
-memory_manager.forget(memory_id)
-memory_manager.get_context(user_input)  # 检索相关记忆并格式化
-```
-
-跨实例持久化：不同的 `MemoryManager` 实例（使用相同 storage_path）共享同一份记忆数据。
 
 ---
 
