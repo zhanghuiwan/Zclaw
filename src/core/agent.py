@@ -19,7 +19,7 @@ from src.llm.router import LLMRouter
 from src.sandbox.runner import CommandRunner
 from src.security.permission import PermissionManager
 from src.security.audit import AuditLogger
-from src.memory.manager import MemoryManager
+from src.memory.coordinator import MemoryCoordinator
 from src.mcp.manager import MCPManager
 from src.tools.builtin.file_tools import FILE_TOOLS
 from src.tools.builtin.search_tools import SEARCH_TOOLS
@@ -105,13 +105,27 @@ class Agent:
             session_id=self._session_id,
         )
 
-        # P4+P8: 记忆模块（含自动提取和生命周期管理）
+        # P4+P8: 记忆模块 V4 (分层架构)
+        from src.memory.config import V4MemoryConfig
         from src.memory.extractor import create_extractor
-        self._memory = MemoryManager(
-            config=settings.memory,
-            session_id=self._session_id,
-            extractor=create_extractor(settings),
+        v4_config = V4MemoryConfig(
+            storage_path=settings.memory.storage_path,
         )
+        self._memory = MemoryCoordinator(
+            storage_root=v4_config.resolve_storage_path(),
+            session_id=self._session_id,
+            config=v4_config,
+        )
+        self._memory.extractor = create_extractor(settings)
+
+        # P8: 注册 V4 记忆工具
+        from src.memory.tools.episodic_search import SearchConversationHistoryTool, GetSessionHistoryTool
+        from src.memory.tools.memory_tools import UpdateSemanticMemoryTool, SetPreferenceTool
+        self._tools.register(SearchConversationHistoryTool(self._memory.episodic))
+        self._tools.register(GetSessionHistoryTool(self._memory.episodic))
+        self._tools.register(UpdateSemanticMemoryTool(self._memory.semantic))
+        self._tools.register(SetPreferenceTool(self._memory.semantic))
+        logger.info("Registered V4 memory tools: search_conversation_history, get_session_history, update_memory, set_preference")
 
         # P5: 上下文管理器
         default_max_tokens = 32768
@@ -134,8 +148,8 @@ class Agent:
                 self._tools.register_many(skill_tools)
                 logger.info(f"注册 {len(skill_tools)} 个 skill 工具: {[t.name for t in skill_tools]}")
 
-        # P8: 构建初始 system prompt（含记忆上下文）
-        initial_memory_ctx = self._memory.get_context()
+        # P8: 构建初始 system prompt（含 L4/L3/L1 上下文，V4 架构）
+        initial_memory_ctx = self._memory.build_system_prompt_context()
         self._loop = AgentLoop(
             llm=self._llm,
             agent_config=settings.agent,
@@ -216,7 +230,7 @@ class Agent:
         return self._tools
 
     @property
-    def memory(self) -> MemoryManager:
+    def memory(self) -> MemoryCoordinator:
         return self._memory
 
     @property
@@ -276,7 +290,7 @@ class Agent:
             if mcp_tools:
                 self._tools.register_many(mcp_tools)
                 # 更新 system prompt 以包含新的工具
-                memory_ctx = self._memory.get_context()
+                memory_ctx = self._memory.build_system_prompt_context()
                 new_prompt = self._prompt_builder.build(
                     tool_names=self._tools.tool_names,
                     memory_context=memory_ctx,
@@ -296,25 +310,40 @@ class Agent:
 
     async def chat(self, user_input: str) -> Response:
         logger.info(f"User input: {user_input[:100]}...")
-        # P8: 注入记忆上下文
+        # P8 V4: L0 感知捕获
+        self._memory.perceive(user_input)
+        # P8 V4: 注入最小化记忆上下文 (L4/L3/L1)
         self._update_memory_context(user_input)
         response = await self._loop.run(user_input)
-        # P8: 对话结束后自动提取记忆
-        await self._memory.extract_from_conversation(self._loop.messages)
+        # P8 V4: 归档对话到 L2 (不可变档案)
+        self._memory.archive_turn(role="user", content=user_input)
+        self._memory.archive_turn(role="assistant", content=response.content or "")
+        # P8 V4: 提取并分发记忆到各层
+        await self._memory.extract_and_store(self._loop.messages, self._memory.extractor)
         return response
 
     async def chat_stream(self, user_input: str) -> AsyncIterator[StreamEvent]:
         logger.info(f"User input (stream): {user_input[:100]}...")
-        # P8: 注入记忆上下文
+        # P8 V4: L0 感知捕获
+        self._memory.perceive(user_input)
+        # P8 V4: 注入最小化记忆上下文
         self._update_memory_context(user_input)
+        response_content = ""
         async for event in self._loop.run_stream(user_input):
             yield event
-        # P8: 对话结束后自动提取记忆
-        await self._memory.extract_from_conversation(self._loop.messages)
+            if hasattr(event, 'type') and hasattr(event, 'data'):
+                if event.type.value == "content_delta":
+                    response_content += event.data
+        # P8 V4: 归档对话到 L2
+        self._memory.archive_turn(role="user", content=user_input)
+        self._memory.archive_turn(role="assistant", content=response_content)
+        # P8 V4: 提取并分发记忆
+        await self._memory.extract_and_store(self._loop.messages, self._memory.extractor)
 
     def _update_memory_context(self, user_input: str) -> None:
-        """P8: 根据用户输入检索相关记忆并更新 system prompt。"""
-        memory_ctx = self._memory.get_context(query=user_input)
+        """P8 V4: 构建最小化的 system prompt 上下文（L4/L3/L1，无 L2 自动注入）。"""
+        # V4: 构建最小化上下文 (L4 rules + L3 state + L1 task)
+        memory_ctx = self._memory.build_system_prompt_context()
 
         # P10: 同时注入 skill 上下文
         skill_ctx = ""
@@ -328,7 +357,7 @@ class Agent:
                 skill_context=skill_ctx if skill_ctx else None,
             )
             self._loop.set_system_prompt(new_prompt)
-            logger.debug(f"已注入记忆上下文 ({len(memory_ctx) if memory_ctx else 0} 字符), "
+            logger.debug(f"已注入 V4 记忆上下文 ({len(memory_ctx) if memory_ctx else 0} 字符), "
                         f"skill 上下文 ({len(skill_ctx) if skill_ctx else 0} 字符)")
 
     def set_system_prompt(self, prompt: str) -> None:

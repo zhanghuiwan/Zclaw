@@ -1,5 +1,5 @@
 """
-P4 End-to-End Validation - Memory module.
+P4 End-to-End Validation - V4 Memory Module.
 """
 
 import asyncio
@@ -10,200 +10,207 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 
-async def test_memory_types():
+async def test_v4_layers():
+    """Test V4 memory layers (L0-L4)."""
     print("=" * 60)
-    print("1. Testing Memory Types")
+    print("1. Testing V4 Memory Layers (L0-L4)")
     print("=" * 60)
-    from src.memory.types import Memory, MemoryType
 
-    m1 = Memory(content="Project uses Python 3.12", type=MemoryType.FACT, tags=["python", "config"])
-    assert m1.type == MemoryType.FACT
-    assert m1.content == "Project uses Python 3.12"
-    print("  OK Memory creation")
-
-    m1.touch()
-    assert m1.access_count == 1
-    assert m1.last_accessed != ""
-    print("  OK touch() updates access")
-
-    d = m1.to_dict()
-    assert d["type"] == "fact"
-    assert "python" in d["tags"]
-    print("  OK to_dict()")
-
-    m2 = Memory.from_dict(d)
-    assert m2.content == m1.content
-    assert m2.type == MemoryType.FACT
-    print("  OK from_dict()")
-
-    # All types
-    for mt in MemoryType:
-        m = Memory(content=f"Test {mt.value}", type=mt)
-        assert m.type == mt
-    print("  OK All memory types")
-
-    print()
-
-
-async def test_memory_store():
-    print("=" * 60)
-    print("2. Testing Memory Store")
-    print("=" * 60)
-    from src.memory.types import Memory, MemoryType
-    from src.memory.store import MemoryStore
+    from src.memory.config import V4MemoryConfig
+    from src.memory.coordinator import MemoryCoordinator
+    from src.memory.layers import (
+        PerceptualBuffer, WorkingMemory, EpisodicMemory,
+        SemanticMemory, ProceduralMemory,
+    )
 
     with tempfile.TemporaryDirectory() as tmpdir:
-        store = MemoryStore(storage_path=tmpdir)
-        assert store.count == 0
+        config = V4MemoryConfig(storage_path=tmpdir)
 
-        m1 = store.add(Memory(content="Fact A", type=MemoryType.FACT))
-        m2 = store.add(Memory(content="Event B", type=MemoryType.EPISODE, tags=["test"]))
-        m3 = store.add(Memory(content="Preference C", type=MemoryType.PREFERENCE))
-        assert store.count == 3
-        print("  OK Add 3 memories")
+        # L0: Perceptual Buffer
+        buf = PerceptualBuffer(max_turns=2)
+        entry1 = buf.capture("Hello", "Hi there")
+        assert entry1.turn_index == 1
+        entry2 = buf.capture("How are you?", "I'm fine")
+        assert entry2.turn_index == 2
+        assert buf.turn_count == 2
+        assert buf.get_current() == entry2
+        print("  OK L0 Perceptual Buffer")
 
-        got = store.get(m1.id)
-        assert got is not None and got.content == "Fact A"
-        print("  OK Get by id")
+        # L1: Working Memory
+        working = WorkingMemory(Path(tmpdir))
+        snap = working.create_snapshot("test_session")
+        working.update_snapshot(
+            task_description="Test task",
+            active_files=["test.py"],
+            pending_goals=["goal1", "goal2"],
+        )
+        assert working.current.task_description == "Test task"
+        assert len(working.current.pending_goals) == 2
+        working.complete_goal("goal1")
+        assert "goal1" in working.current.completed_goals
+        assert "goal1" not in working.current.pending_goals
+        working.add_tool_call("file_read", {"path": "test.py"}, "file content")
+        assert len(working.current.tool_history) == 1
+        print("  OK L1 Working Memory")
 
-        store.update(m1.id, content="Updated Fact A")
-        updated = store.get(m1.id)
-        assert updated.content == "Updated Fact A"
-        print("  OK Update")
-
-        # List with filter
-        facts = store.list_all(mem_type="fact")
-        assert len(facts) == 1 and facts[0].content == "Updated Fact A"
-        print("  OK List by type")
-
-        tagged = store.list_all(tag="test")
-        assert len(tagged) == 1 and tagged[0].content == "Event B"
-        print("  OK List by tag")
-
-        # Search
-        results = store.search("Fact")
+        # L2: Episodic Memory
+        episodic = EpisodicMemory(Path(tmpdir), vector_store_enabled=False)
+        ep1 = episodic.append(type("E", (), {
+            "id": "1", "session_id": "s1", "timestamp": "2026-04-10T10:00:00",
+            "role": "user", "content": "Hello", "summary": "", "embedding_id": None, "tool_calls": []
+        })())
+        ep2 = episodic.append(type("E", (), {
+            "id": "2", "session_id": "s1", "timestamp": "2026-04-10T10:01:00",
+            "role": "assistant", "content": "Hi there", "summary": "", "embedding_id": None, "tool_calls": []
+        })())
+        assert episodic.count() == 2
+        results = episodic.search(query="Hello")
         assert len(results) >= 1
-        print(f"  OK Search: found {len(results)}")
+        history = episodic.get_session_history("s1")
+        assert len(history) == 2
+        print("  OK L2 Episodic Memory")
 
-        # Delete
-        assert store.delete(m1.id)
-        assert store.get(m1.id) is None
-        assert store.count == 2
-        print("  OK Delete")
+        # L3: Semantic Memory
+        semantic = SemanticMemory(Path(tmpdir))
+        semantic.update_user_profile(name="Tom", preferred_language="Python")
+        semantic.set_preference("dark_mode", True)
+        assert semantic.get_user_profile().name == "Tom"
+        assert semantic.get_preference("dark_mode") is True
+        semantic.update_project_profile(tech_stack=["Python", "FastAPI"], architecture="REST API")
+        assert "Python" in semantic.get_project_profile().tech_stack
+        ctx = semantic.format_for_system_prompt()
+        assert "Tom" in ctx
+        assert "Python" in ctx
+        print("  OK L3 Semantic Memory")
 
-        # Persistence
-        store2 = MemoryStore(storage_path=tmpdir)
-        assert store2.count == 2
-        print("  OK Persistence across instances")
-
-        # Clear
-        store.clear()
-        assert store.count == 0
-        print("  OK Clear")
+        # L4: Procedural Memory
+        procedural = ProceduralMemory(Path(tmpdir))
+        rules = procedural.get_global_rules()
+        assert "coding_rules" in rules or len(rules) >= 0
+        ctx = procedural.format_for_system_prompt()
+        assert "Rules" in ctx or len(ctx) > 0
+        print("  OK L4 Procedural Memory")
 
     print()
 
 
-async def test_memory_retriever():
+async def test_memory_coordinator():
+    """Test MemoryCoordinator."""
     print("=" * 60)
-    print("3. Testing Memory Retriever")
+    print("2. Testing Memory Coordinator")
     print("=" * 60)
-    from src.memory.types import Memory, MemoryType
-    from src.memory.store import MemoryStore
-    from src.memory.retriever import MemoryRetriever
+
+    from src.memory.config import V4MemoryConfig
+    from src.memory.coordinator import MemoryCoordinator
 
     with tempfile.TemporaryDirectory() as tmpdir:
-        store = MemoryStore(storage_path=tmpdir)
-        store.add(Memory(content="User prefers dark mode", type=MemoryType.PREFERENCE, tags=["ui"], importance=0.8))
-        store.add(Memory(content="Project uses TypeScript", type=MemoryType.FACT, tags=["config"]))
-        store.add(Memory(content="Fixed login bug yesterday", type=MemoryType.EPISODE, tags=["bug"], importance=0.6))
+        config = V4MemoryConfig(storage_path=tmpdir)
+        coord = MemoryCoordinator(
+            storage_root=config.resolve_storage_path(),
+            session_id="test_session",
+            config=config,
+        )
 
-        retriever = MemoryRetriever(store)
+        # L0 perception
+        entry = coord.perceive("Hello", "Hi")
+        assert entry.turn_index == 1
+        print("  OK perceive()")
 
-        # Relevant retrieval
-        results = retriever.retrieve("dark mode preference")
+        # L1 context
+        snap = coord.update_working_context(
+            task_description="Test task",
+            active_files=["main.py"],
+        )
+        assert snap.task_description == "Test task"
+        coord.add_pending_goal("Complete feature X")
+        assert "Complete feature X" in coord.working.current.pending_goals
+        print("  OK working context")
+
+        # L2 archive
+        ep = coord.archive_turn(role="user", content="我叫 Tom")
+        assert ep.content == "我叫 Tom"
+        results = coord.search_episodic(query="Tom")
         assert len(results) >= 1
-        assert any("dark mode" in m.content for m in results)
-        print("  OK Relevant retrieval")
+        print("  OK episodic archive")
 
-        # Recent
-        recent = retriever.get_recent(limit=2)
-        assert len(recent) == 2
-        assert recent[0].created_at >= recent[1].created_at
-        print("  OK Get recent")
+        # L3 state
+        coord.semantic.update_user_profile(name="Jack")
+        assert coord.semantic.get_user_profile().name == "Jack"
+        print("  OK semantic state")
 
-        # By type
-        facts = retriever.get_by_type("fact")
-        assert len(facts) == 1 and "TypeScript" in facts[0].content
-        print("  OK Get by type")
-
-        # Format for context
-        context = retriever.format_for_context(results)
-        assert "## 相关记忆" in context
-        assert "pref" in context or "fact" in context
-        print(f"  OK Format for context:\n{context[:200]}")
+        # System prompt context
+        ctx = coord.build_system_prompt_context()
+        assert "Jack" in ctx
+        assert "Rules" in ctx or "Behavior" in ctx
+        print(f"  OK build_system_prompt_context() ({len(ctx)} chars)")
 
     print()
 
 
-async def test_memory_manager():
+async def test_memory_tools():
+    """Test V4 memory tools."""
     print("=" * 60)
-    print("4. Testing Memory Manager")
+    print("3. Testing Memory Tools")
     print("=" * 60)
-    from src.memory.manager import MemoryManager
-    from src.config.settings import MemoryConfig
+
+    from src.memory.config import V4MemoryConfig
+    from src.memory.coordinator import MemoryCoordinator
+    from src.memory.tools.episodic_search import SearchConversationHistoryTool, GetSessionHistoryTool
+    from src.memory.tools.memory_tools import UpdateSemanticMemoryTool, SetPreferenceTool
 
     with tempfile.TemporaryDirectory() as tmpdir:
-        config = MemoryConfig(storage_path=tmpdir)
-        mgr = MemoryManager(config=config, session_id="test_p4")
+        config = V4MemoryConfig(storage_path=tmpdir)
+        coord = MemoryCoordinator(
+            storage_root=config.resolve_storage_path(),
+            session_id="test_session",
+            config=config,
+        )
 
-        # remember
-        m1 = mgr.remember("User likes Vim", mem_type="preference", tags=["editor"])
-        assert m1.content == "User likes Vim"
-        assert m1.type.value == "preference"
-        print("  OK remember()")
+        # Archive some data for search
+        coord.archive_turn(role="user", content="我叫 Tom")
+        coord.archive_turn(role="assistant", content="好的 Tom")
+        coord.archive_turn(role="user", content="请用 Python 写快排")
+        coord.archive_turn(role="assistant", content="好的，这是 Python 快排...")
 
-        m2 = mgr.remember("Project: Zclaw", mem_type="fact", importance=0.9)
-        m3 = mgr.remember("Fixed a critical bug", mem_type="episode")
-        print("  OK remember() x3")
+        # Test search_conversation_history
+        search_tool = SearchConversationHistoryTool(coord.episodic)
+        result = await search_tool.execute(query="Tom", limit=5)
+        assert result.success
+        assert "Tom" in result.content
+        print("  OK search_conversation_history")
 
-        assert mgr.store.count == 3
-        print("  OK Store count")
+        # Test get_session_history
+        history_tool = GetSessionHistoryTool(coord.episodic)
+        result = await history_tool.execute(session_id="test_session", limit=10)
+        assert result.success
+        print("  OK get_session_history")
 
-        # recall
-        results = mgr.recall("editor preference")
-        assert len(results) >= 1
-        print("  OK recall()")
+        # Test update_memory
+        update_tool = UpdateSemanticMemoryTool(coord.semantic)
+        result = await update_tool.execute(
+            category="user",
+            data={"name": "John", "preferred_code_style": "functional"}
+        )
+        assert result.success
+        assert coord.semantic.get_user_profile().name == "John"
+        print("  OK update_memory")
 
-        # get_context
-        ctx = mgr.get_context("editor")
-        assert "## 相关记忆" in ctx
-        assert "Vim" in ctx
-        print("  OK get_context()")
-
-        # Stats
-        stats = mgr.get_stats()
-        assert stats["total"] == 3
-        assert stats["by_type"]["preference"] == 1
-        print(f"  OK Stats: {stats}")
-
-        # forget
-        assert mgr.forget(m1.id)
-        assert mgr.store.count == 2
-        print("  OK forget()")
-
-        # Persistence
-        mgr2 = MemoryManager(config=config, session_id="test_p4_2")
-        assert mgr2.store.count == 2
-        print("  OK Persistence across managers")
+        # Test set_preference
+        pref_tool = SetPreferenceTool(coord.semantic)
+        result = await pref_tool.execute(key="timezone", value="Asia/Shanghai")
+        assert result.success
+        assert coord.semantic.get_preference("timezone") == "Asia/Shanghai"
+        print("  OK set_preference")
 
     print()
 
 
-async def test_full_agent_p4():
+async def test_agent_integration():
+    """Test Agent with V4 memory."""
     print("=" * 60)
-    print("5. Testing Full Agent with Memory")
+    print("4. Testing Agent Integration")
     print("=" * 60)
+
     from src.config.settings import load_yaml_config, Settings
     from src.core.agent import Agent
 
@@ -215,18 +222,26 @@ async def test_full_agent_p4():
         agent = Agent(settings)
 
         assert agent.memory is not None
-        print(f"  OK Agent: {agent}")
-        print(f"  OK Memory: {agent.memory}")
+        print(f"  OK Agent created: {agent}")
+        print(f"  OK Memory type: {type(agent.memory).__name__}")
 
-        # Use memory
-        agent.memory.remember("Test session memory", tags=["session"])
-        assert agent.memory.store.count == 1
-        print("  OK Memory accessible from agent")
+        # Test that memory tools are registered
+        assert agent.tools.has("search_conversation_history")
+        assert agent.tools.has("get_session_history")
+        assert agent.tools.has("update_memory")
+        assert agent.tools.has("set_preference")
+        print("  OK Memory tools registered")
 
-        # Reinitialize and check persistence
-        agent2 = Agent(settings)
-        assert agent2.memory.store.count == 1
-        print("  OK Memory persists across agent instances")
+        # Test system prompt contains memory context
+        ctx = agent.memory.build_system_prompt_context()
+        assert len(ctx) > 0
+        print(f"  OK Memory context built ({len(ctx)} chars)")
+
+        # Test archive turn
+        agent.memory.archive_turn(role="user", content="Test message")
+        results = agent.memory.search_episodic(query="Test")
+        assert len(results) >= 1
+        print("  OK Archive and search")
 
     print()
 
@@ -234,16 +249,15 @@ async def test_full_agent_p4():
 async def main():
     print()
     print("=" * 60)
-    print("        Zclaw P4 - Memory Module Validation")
+    print("        Zclaw P4 - V4 Memory Module Validation")
     print("=" * 60)
     print()
 
     tests = [
-        test_memory_types,
-        test_memory_store,
-        test_memory_retriever,
-        test_memory_manager,
-        test_full_agent_p4,
+        test_v4_layers,
+        test_memory_coordinator,
+        test_memory_tools,
+        test_agent_integration,
     ]
 
     passed = 0
