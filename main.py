@@ -49,7 +49,7 @@ RESET = "\033[0m"
 def print_banner():
     print(f"""
 {CYAN}{BOLD}╔══════════════════════════════════════╗
-║         Zclaw v0.3.0 - Chat Mode     ║
+║         Zclaw v0.1.0 - Chat Mode     ║
 ║     Claude Code 风格 AI 编程助手      ║
 ╚══════════════════════════════════════╝{RESET}
 """)

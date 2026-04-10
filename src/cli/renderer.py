@@ -48,7 +48,7 @@ class Renderer:
         banner = Text()
         banner.append("╔══════════════════════════════════════╗\n", style="info")
         banner.append("║", style="info")
-        banner.append("         Zclaw v0.3.0               ", style="bold")
+        banner.append("         Zclaw v0.1.0               ", style="bold")
         banner.append("║\n", style="info")
         banner.append("║  Claude Code 风格 AI 编程助手       ║\n", style="dim")
         banner.append("╚══════════════════════════════════════╝\n", style="info")
