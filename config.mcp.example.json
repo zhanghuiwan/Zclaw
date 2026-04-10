@@ -1,0 +1,25 @@
+{
+    "mcpServers": {
+        "filesystem": {
+            "command": "npx",
+            "args": ["-y", "@modelcontextprotocol/server-filesystem", "/tmp"],
+            "description": "文件系统操作服务器"
+        },
+        "github": {
+            "command": "npx",
+            "args": ["-y", "@modelcontextprotocol/server-github"],
+            "env": {
+                "GITHUB_TOKEN": "${GITHUB_TOKEN}"
+            },
+            "description": "GitHub 操作服务器"
+        },
+        "tavily": {
+            "command": "npx",
+            "args": ["-y", "tavily-mcp"],
+            "env": {
+                "TAVILY_API_KEY": "${TAVILY_API_KEY}"
+            },
+            "description": "Tavily AI 搜索服务"
+        }
+    }
+}

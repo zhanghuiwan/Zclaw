@@ -1,0 +1,58 @@
+# Zclaw 配置文件
+# 放置于 ~/.Zclaw/config.yaml 或项目根目录 .Zclaw.yaml
+
+# LLM 提供者配置
+llm:
+  default_provider: "bailian"
+  fallback_providers: ["ollama"]
+  temperature: 0.3
+  max_tokens: 8192
+
+  providers:
+    bailian:
+      base_url: "https://dashscope.aliyuncs.com/compatible-mode/v1"
+      api_key: "${DASHSCOPE_API_KEY}"
+      model: "qwen-plus"
+      max_context_tokens: 131072
+      supports_tools: true
+      supports_vision: false
+      supports_streaming: true
+
+    ollama:
+      base_url: "http://localhost:11434/v1"
+      api_key: "ollama"
+      model: "qwen2.5:latest"
+      max_context_tokens: 32768
+      supports_tools: true
+      supports_vision: false
+      supports_streaming: true
+
+# Agent 行为配置
+agent:
+  max_loop_rounds: 50
+  planning_mode: "auto"
+
+# 记忆配置
+memory:
+  storage_path: ".Zclaw/memory"
+  working_memory_max_tokens: 30000
+  episodic_max_age_days: 90
+
+# 上下文配置
+context:
+  safety_margin_ratio: 0.1
+
+# 安全配置
+security:
+  path_restrictions:
+    allow:
+      - "."
+    deny:
+      - "/etc"
+      - "/usr"
+  audit_log: true
+  audit_log_path: ".Zclaw/audit"
+
+# MCP 配置
+mcp:
+  config_path: ".Zclaw/mcp_servers.json"
