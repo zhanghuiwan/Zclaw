@@ -509,63 +509,218 @@ cache.put(tool_name, args, result)  # 写入
 
 ### 3.6 安全系统 (security)
 
-#### 3.6.1 权限管理器 (`permission.py`)
+Zclaw 采用多层次安全机制，包括危险等级判定、路径限制、命令拦截、输入校验、输出清洗和审计日志。
 
-`PermissionManager` 实现四级判定流程：
+#### 3.6.1 三级危险等级 (DangerLevel)
 
-```
-1. 自动批准列表 (auto_approve) ──→ ALLOW
-2. 危险模式拦截 (blocked_patterns) ──→ DENY
-3. 路径限制检查 (path_restrictions) ──→ DENY
-4. 危险等级判定:
-   ├─ safe → ALLOW
-   ├─ confirm + auto_confirm → ALLOW
-   ├─ confirm + callback → 调用用户确认函数
-   └─ dangerous + callback → 始终调用用户确认函数
+定义于 `src/tools/base.py:15-19` 和 `src/security/permission.py:33-37`：
+
+```python
+class DangerLevel(str, Enum):
+    SAFE = "safe"       # 自动批准
+    CONFIRM = "confirm" # 需用户确认
+    DANGEROUS = "dangerous"  # 始终确认
 ```
 
-**回调机制**: `ConfirmCallback = Callable[[PermissionRequest], Awaitable[bool]]`，CLI 层注册回调，在终端弹出 `[y/N]` 确认提示。
+内置工具危险等级：
 
-**路径检查**: 对文件类工具（file_read/write/edit），将路径解析为绝对路径后，检查是否在 deny 列表目录下、是否在 allow 列表目录外。
+| 工具 | 等级 | 说明 |
+|------|------|------|
+| `file_read`, `grep`, `glob`, `directory` | safe | 只读操作 |
+| `shell`, `file_write`, `file_edit`, `git_commit` | confirm | 需确认 |
+| 高危系统命令 | dangerous | 始终确认 |
 
-#### 3.6.2 输入/输出安全 (`validator.py`)
+#### 3.6.2 权限管理器 (PermissionManager)
 
-**InputValidator**:
-- `validate_path()`: 检测路径穿越 `../`、空路径、非法绝对路径
-- `validate_command()`: 检测空命令、过多链式命令（注入防护）
-- `validate_length()`: 限制输入长度
-- `validate_file_size()`: 限制内容大小（默认 1MB）
-
-**OutputSanitizer**:
-- `redact_sensitive()`: 正则匹配 API Key、Bearer Token、AWS Key 等敏感信息并替换为 `***REDACTED***`
-- `clean_control_chars()`: 移除控制字符（保留 \n\r\t）
-- `truncate()`: 超长输出截断（默认 50,000 字符）
-
-#### 3.6.3 审计日志 (`audit.py`)
-
-`AuditLogger` 将所有工具调用追加到 JSONL 格式日志文件：
+`src/security/permission.py` 实现五级判定流程：
 
 ```
-~/.Zclaw/audit/2026-04-07_a38db586.jsonl
+请求进入
+    │
+    ├─► 1. 检查 auto_approve 列表 ──► ALLOW
+    │
+    ├─► 2. 检查 blocked_patterns ──► DENY
+    │
+    ├─► 3. 检查路径限制 ──► DENY (如违反)
+    │
+    └─► 4. 按危险等级处理:
+            ├── safe     ──► ALLOW (自动)
+            ├── confirm  ──► CONFIRM (回调或 auto_confirm)
+            └── dangerous ──► CONFIRM (无回调时需确认)
 ```
 
-每条记录包含：
-```json
-{
-  "timestamp": "2026-04-07T15:30:00",
-  "session_id": "a38db586227c",
-  "tool_name": "file_write",
-  "arguments": {"path": "/tmp/test.py", "content": "***REDACTED***"},
-  "danger_level": "confirm",
-  "permission_decision": "allow",
-  "permission_auto": false,
-  "execution_success": true,
-  "duration_ms": 15,
-  "user_message_context": "帮我创建一个测试文件"
+**回调机制**: `ConfirmCallback = Callable[[PermissionRequest], Awaitable[bool]]`，CLI 层注册回调 (`set_confirm_callback`)，在终端弹出 `[y/N]` 确认提示。
+
+#### 3.6.3 路径限制 (Path Restrictions)
+
+配置于 `src/config/settings.py:82-95`：
+
+```python
+path_restrictions: dict[str, list[str]] = {
+    "allow": ["."],   # 白名单：当前目录
+    "deny": ["/etc", "/usr", "/bin", "/sbin", "/boot", "/proc", "/sys"],  # 黑名单
 }
 ```
 
-自动脱敏 arguments 中的 password、token、secret 等字段。
+实现逻辑 (`src/security/permission.py:210-240`)：
+- 解析相对路径为绝对路径
+- 检查是否在 deny 列表目录下
+- 检查是否在 allow 列表目录外
+- **仅作用于文件工具**: `file_read`, `file_write`, `file_edit`
+
+#### 3.6.4 危险命令拦截
+
+配置于 `src/config/settings.py:93-95`：
+
+```python
+blocked_patterns: list[str] = [
+    r"rm\s+-rf\s+/",   # 递归删除根目录
+    r"sudo\s+",        # 提权命令
+    r"mkfs",           # 文件系统格式化
+    r"dd\s+if=",       # 磁盘直接读写
+    r":\(\)\{",        # Fork 炸弹
+]
+```
+
+Shell 工具额外模式 (`src/tools/builtin/shell_tool.py:26-31`)：
+
+```python
+_DANGEROUS_PATTERNS = [
+    r"\brm\s+-rf\s+/", r"\brm\s+-rf\s+\*", r"\bsudo\s+",
+    r"\bmkfs\b", r"\bdd\s+if=", r":\(\)\{\s*:\|",
+    r"\bchmod\s+777\s+/", r"\bshutdown\b", r"\breboot\b", r"\binit\s+0\b",
+]
+```
+
+#### 3.6.5 输入校验 (InputValidator)
+
+`src/security/validator.py` 提供以下校验：
+
+| 方法 | 检测内容 |
+|------|---------|
+| `validate_path()` | 路径穿越 (`../`, `..\`)、空路径、非法绝对路径 |
+| `validate_command()` | 空命令、过多链式命令 (`;`) |
+| `validate_length()` | 最大长度限制 |
+| `validate_file_size()` | 最大文件大小 (默认 1MB) |
+
+#### 3.6.6 输出清洗 (OutputSanitizer)
+
+`src/security/validator.py:18-100`：
+
+```python
+# 敏感信息脱敏
+_SENSITIVE_PATTERNS = [
+    (re.compile(r'(?:api[_-]?key|apikey|secret|token|password)\s*[=:]\s*["\']?[\w\-]{20,}'), "***REDACTED***"),
+    (re.compile(r'Bearer\s+[\w\-\.]{20,}'), "Bearer ***REDACTED***"),
+    (re.compile(r'(?:AKIA|ASIA)[A-Z0-9]{16}'), "***AWS_KEY***"),
+]
+
+# 控制字符清理：保留 \n\r\t，过滤 ASCII < 32
+# 输出截断：最大 50,000 字符
+
+# 完整清洗管道
+def sanitize(text):
+    text = clean_control_chars(text)
+    text = redact_sensitive(text)
+    text = truncate(text)
+    return text
+```
+
+#### 3.6.7 审计日志 (AuditLogger)
+
+`src/security/audit.py` 将所有工具调用追加到 JSONL 文件：
+
+```
+~/.Zclaw/audit/2026-04-12_a38db586.jsonl
+```
+
+**日志格式**：
+
+```json
+{
+  "timestamp": "2026-04-12T10:30:00",
+  "session_id": "abc123",
+  "tool_name": "file_write",
+  "arguments": {"path": "/tmp/test.py", "content": "..."},
+  "danger_level": "confirm",
+  "permission_decision": "ALLOW",
+  "permission_auto": false,
+  "execution_success": true,
+  "duration_ms": 15,
+  "user_message_context": "帮我创建测试文件"
+}
+```
+
+**自动脱敏**: `password`, `token`, `api_key`, `secret`, `private_key` 等字段。
+
+#### 3.6.8 安全集成架构
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                         CLI / REPL                               │
+│  ┌─────────────┐  ┌─────────────┐  ┌─────────────────────────┐ │
+│  │  app.py     │  │  renderer.py│  │  permission callback     │ │
+│  └─────────────┘  └─────────────┘  └─────────────────────────┘ │
+└─────────────────────────────────────────────────────────────────┘
+                              │
+                              ▼
+┌─────────────────────────────────────────────────────────────────┐
+│                         Agent                                    │
+│  ┌─────────────┐  ┌─────────────┐  ┌─────────────────────────┐ │
+│  │  chat_stream│  │ Permission  │  │ AuditLogger             │ │
+│  │             │  │ Manager      │  │                         │ │
+│  └─────────────┘  └─────────────┘  └─────────────────────────┘ │
+└─────────────────────────────────────────────────────────────────┘
+                              │
+          ┌───────────────────┼───────────────────┐
+          ▼                   ▼                   ▼
+┌─────────────────┐ ┌─────────────────┐ ┌─────────────────┐
+│  Validator      │ │ Permission      │ │ AuditLogger     │
+│  (输入/输出校验) │ │ Manager         │ │ (日志记录)       │
+│                 │ │ (危险等级/路径)  │ │                 │
+│  · 路径穿越     │ │                 │ │ · JSONL 格式    │
+│  · 命令注入     │ │ · Danger Level  │ │ · 自动脱敏      │
+│  · 长度限制     │ │ · Path Restrict │ │                 │
+│  · 敏感信息脱敏 │ │ · Blocked Cmds  │ │                 │
+│  · 控制字符清理 │ │                 │ │                 │
+└─────────────────┘ └─────────────────┘ └─────────────────┘
+```
+
+#### 3.6.9 安全配置参考
+
+```yaml
+security:
+  # 危险等级细化
+  danger_levels:
+    shell:
+      level: dangerous  # 可改为 dangerous
+      auto_approve_patterns:  # 允许自动执行的命令白名单
+        - "^git "
+        - "^ls "
+        - "^pwd "
+
+  # 路径限制增强
+  path_restrictions:
+    allow: ["."]
+    deny: ["/etc", "/usr", "/bin", "/sbin", "/boot", "/proc", "/sys"]
+
+  # 审计日志
+  audit_log: true
+  audit_log_path: ~/.Zclaw/audit
+```
+
+#### 3.6.10 安全子系统文件索引
+
+| 功能 | 文件路径 | 关键行号 |
+|------|----------|----------|
+| 危险等级定义 | `src/tools/base.py` | 15-19 |
+| 权限检查实现 | `src/security/permission.py` | 148-196 |
+| 路径限制实现 | `src/security/permission.py` | 210-240 |
+| 危险命令拦截 | `src/security/permission.py` | 88-93, 198-205 |
+| 输入校验 | `src/security/validator.py` | 全文 |
+| 输出清洗 | `src/security/validator.py` | 18-100 |
+| 审计日志 | `src/security/audit.py` | 全文 |
+| 安全配置 | `src/config/settings.py` | 82-95 |
 
 ---
 

@@ -2,6 +2,7 @@
 CLI 应用入口
 
 实现 REPL（Read-Eval-Print Loop）交互界面。
+参考 Claude Code 风格美化界面。
 """
 
 from __future__ import annotations
@@ -16,6 +17,7 @@ from prompt_toolkit.history import FileHistory
 from prompt_toolkit.auto_suggest import AutoSuggestFromHistory
 from prompt_toolkit.key_binding import KeyBindings
 from prompt_toolkit.completion import WordCompleter
+from prompt_toolkit.styles import Style
 
 from src.cli.renderer import Renderer
 from src.config.settings import load_settings, Settings
@@ -25,6 +27,13 @@ from src.llm.models import StreamEventType
 from src.security.permission import PermissionRequest
 
 logger = logging.getLogger(__name__)
+
+# Claude Code 风格提示符样式
+PROMPT_STYLE = Style.from_dict({
+    "prompt": "ansicyan bold",
+    "prompt.tool": "ansimagenta bold",
+    "prompt.user": "ansigreen bold",
+})
 
 
 def setup_logging(verbose: bool = False) -> None:
@@ -40,7 +49,7 @@ def setup_logging(verbose: bool = False) -> None:
 
 
 class REPL:
-    """Read-Eval-Print Loop 交互界面。"""
+    """Read-Eval-Print Loop 交互界面 - Claude Code 风格。"""
 
     def __init__(self, agent: Agent, settings: Settings, renderer: Renderer):
         self._agent = agent
@@ -61,6 +70,7 @@ class REPL:
         history_path = zclaw_dir / "history"
 
         kb = KeyBindings()
+
         @kb.add("c-c")
         def _(event):
             buf = event.current_buffer
@@ -68,6 +78,18 @@ class REPL:
                 event.app.exit(result=None)
             else:
                 buf.reset()
+
+        @kb.add("c-a")
+        def _(event):
+            """Ctrl+A: 移动到行首"""
+            buf = event.current_buffer
+            buf.cursor_position = 0
+
+        @kb.add("c-e")
+        def _(event):
+            """Ctrl+E: 移动到行尾"""
+            buf = event.current_buffer
+            buf.cursor_position = len(buf.text)
 
         # 命令补全器
         commands = [
@@ -96,14 +118,15 @@ class REPL:
         self._current_task: asyncio.Task | None = None
 
     async def run(self) -> None:
+        # Claude Code 风格 Banner
         self._renderer.print_banner()
+        self._renderer.print_welcome()
 
         provider_name = self._settings.llm.default_provider
         provider_config = self._settings.llm.providers[provider_name]
         self._renderer.print_status_info(
             provider_name, provider_config.model, tool_count=len(self._agent.tools)
         )
-        self._renderer.print_info("输入 /help 查看可用命令")
 
         # P9: 启动时自动连接 MCP 服务器
         mcp_count = await self._agent.init_mcp()
@@ -111,11 +134,16 @@ class REPL:
             self._renderer.print_success(f"MCP: 已加载 {mcp_count} 个外部工具")
             self._renderer.print_info(f"当前总工具数: {len(self._agent.tools)}")
 
+        self._renderer.print_newline()
+
         while True:
             try:
-                user_input = await self._session.prompt_async(
-                    [("class:prompt", "> ")],
-                )
+                # Claude Code 风格提示符
+                if self._busy:
+                    prompt = [(("class:prompt", " ◐ "))]
+                else:
+                    prompt = [(("class:prompt", " > "))]
+                user_input = await self._session.prompt_async(prompt)
                 if user_input is None:
                     break
                 user_input = user_input.strip()
@@ -140,7 +168,7 @@ class REPL:
                 self._renderer.print_error(f"未预期的错误: {e}")
                 self._busy = False
 
-        self._renderer.print_info("会话结束，再见！")
+        self._renderer.print_goodbye()
         # P9: 断开 MCP 连接
         await self._agent.shutdown_mcp()
 
@@ -152,9 +180,14 @@ class REPL:
         self._renderer.print_user_input(user_input)
         round_prompt = 0
         round_completion = 0
+        assistant_started = False
         try:
             async for event in self._agent.chat_stream(user_input):
                 if event.type == StreamEventType.CONTENT_DELTA:
+                    # 首次内容时打印头部
+                    if not assistant_started:
+                        self._renderer.print_assistant_header()
+                        assistant_started = True
                     self._renderer.print_streaming_chunk(event.data)
                 elif event.type == StreamEventType.USAGE:
                     round_prompt += event.data.prompt_tokens
@@ -176,7 +209,9 @@ class REPL:
                 elif event.type == StreamEventType.LOOP_START:
                     self._renderer.print_loop_round(event.data["round"])
                 elif event.type == StreamEventType.DONE:
-                    self._renderer.print_newline()
+                    if not assistant_started:
+                        self._renderer.print_assistant_header()
+                    self._renderer.print_streaming_done()
                     self._renderer.print_usage(round_prompt, round_completion)
                     self._cost_tracker.record_round(round_prompt, round_completion)
         except Exception as e:
