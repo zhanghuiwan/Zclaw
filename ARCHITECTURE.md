@@ -1,8 +1,5 @@
 # Zclaw 项目完整技术文档
 
-> 版本: 0.4.0 | 最后更新: 2026-04-10  
-> 测试状态: V4 Memory Module **4/4 测试通过**
-
 ---
 
 ## 目录
@@ -10,19 +7,8 @@
 1. [项目概述](#1-项目概述)
 2. [架构设计](#2-架构设计)
 3. [模块详解](#3-模块详解)
-   - 3.1 [配置管理 (config)](#31-配置管理-config)
-   - 3.2 [LLM 层 (llm)](#32-llm-层-llm)
-   - 3.3 [核心引擎 (core)](#33-核心引擎-core)
-   - 3.4 [工具系统 (tools)](#34-工具系统-tools)
-   - 3.5 [沙箱执行 (sandbox)](#35-沙箱执行-sandbox)
-   - 3.6 [安全系统 (security)](#36-安全系统-security)
-   - 3.7 [记忆模块 (memory)](#37-记忆模块-memory)
-   - 3.8 [上下文管理 (context)](#38-上下文管理-context)
-   - 3.9 [提示词工程 (prompt)](#39-提示词工程-prompt)
-   - 3.10 [插件系统 (plugins)](#310-插件系统-plugins)
-   - 3.11 [CLI 界面 (cli)](#311-cli-界面-cli)
 4. [当前已实现功能一览](#4-当前已实现功能一览)
-5. [扩展方向](#5-扩展方向)
+5. [后续开发方向](#5-后续开发方向)
 
 ---
 
@@ -30,7 +16,9 @@
 
 ### 1.1 什么是 Zclaw？
 
-Zclaw 是一个用 Python 编写的 **Claude Code 风格 AI 编程助手**。它的核心思想是：将大语言模型（LLM）与本地文件系统、Shell 环境深度结合，让 AI 能够像人类程序员一样 **读取代码、修改文件、执行命令、搜索项目**，从而完成复杂的编程任务。
+Zclaw 是一个结合 **Claude Code** 与 **OpenClaw** 思想的 AI 编程助手。Claude Code 部分已基本完成，核心功能包括：工具调用循环、多层安全防护、分层记忆系统、智能上下文管理等。
+
+当前正积极开发类似 OpenClaw 的自主 Agent 能力，包括 24 小时持续运行、本地软件操控、多 Agent 架构等。
 
 ### 1.2 核心特点
 
@@ -39,7 +27,7 @@ Zclaw 是一个用 Python 编写的 **Claude Code 风格 AI 编程助手**。它
 | **多模型支持** | 统一的 OpenAI 兼容接口，支持阿里百炼、本地 Ollama 等任意兼容服务 |
 | **工具调用循环** | Agent Loop 机制，LLM 可自主决定调用哪些工具、调用多少轮 |
 | **分层安全** | 三级危险等级（safe/confirm/dangerous）+ 路径限制 + 命令拦截 + 用户确认 |
-| **V4 持久记忆** | 五层分层架构，Agent 驱动的自主探索，状态与历史分离 |
+| **持久记忆** | 五层分层架构（L0-L4），Agent 驱动的自主探索，状态与历史分离 |
 | **智能上下文** | 自动检测并压缩长对话，适配不同模型的 token 限制 |
 | **插件扩展** | 用户可通过编写 Python 文件自定义工具 |
 | **完整 CLI** | Rich 渲染的终端交互界面，支持 REPL 模式和单次命令模式 |
@@ -62,7 +50,6 @@ Python 3.11+
 Zclaw/
 ├── config.example.yaml           # 配置示例文件
 ├── pyproject.toml                # 项目元数据与依赖
-├── ROADMAP.md                    # 开发路线图
 ├── src/
 │   ├── __init__.py
 │   ├── config/                   # 配置管理
@@ -88,24 +75,28 @@ Zclaw/
 │   │       ├── shell_tool.py     # Shell 命令执行
 │   │       ├── grep_tool.py      # 正则内容搜索
 │   │       ├── glob_tool.py      # Glob 模式匹配
-│   │       └── multi_edit_tool.py# 批量编辑（原子操作）
+│   │       ├── multi_edit_tool.py # 批量编辑（原子操作）
+│   │       ├── line_edit_tool.py  # 行号级编辑
+│   │       ├── diff_tool.py      # Diff 预览 + 文件快照
+│   │       ├── git_tool.py       # Git 集成
+│   │       └── ast_tool.py       # 语法感知编辑
 │   ├── sandbox/
 │   │   └── runner.py             # 命令运行器（超时、输出控制）
 │   ├── security/                 # 安全系统
 │   │   ├── permission.py         # 权限管理器
 │   │   ├── validator.py          # 输入校验 + 输出清洗
 │   │   └── audit.py              # 审计日志
-│   ├── memory/                   # V4 记忆模块
-│   │   ├── config.py             # V4 配置类
-│   │   ├── coordinator.py         # 记忆协调器
+│   ├── memory/                   # 记忆模块
+│   │   ├── config.py             # 配置类
+│   │   ├── coordinator.py        # 记忆协调器
 │   │   ├── extractor.py          # LLM 提取器
 │   │   ├── layers/              # 分层实现
-│   │   │   ├── l0_perceptual.py # RingBuffer
+│   │   │   ├── l0_perceptual.py  # RingBuffer
 │   │   │   ├── l1_working.py    # 会话快照
-│   │   │   ├── l2_episodic.py  # SQLite-VSS
+│   │   │   ├── l2_episodic.py   # SQLite-VSS
 │   │   │   ├── l3_semantic.py   # JSON 当前状态
 │   │   │   └── l4_procedural.py # YAML 规则
-│   │   └── tools/               # 记忆工具
+│   │   └── tools/              # 记忆工具
 │   │       ├── episodic_search.py # 搜索历史
 │   │       └── memory_tools.py   # 更新记忆
 │   ├── context/                  # 上下文管理
@@ -115,21 +106,34 @@ Zclaw/
 │   ├── prompt/                   # 提示词工程
 │   │   ├── templates.py          # 模板库
 │   │   └── builder.py            # 动态组装器
+│   ├── mcp/                      # MCP 协议
+│   │   ├── types.py              # 数据类型
+│   │   ├── transport.py          # 传输层
+│   │   ├── client.py             # MCP 客户端
+│   │   ├── adapter.py            # 工具适配器
+│   │   └── manager.py            # MCP 管理器
 │   ├── plugins/                  # 插件系统
 │   │   └── loader.py             # 插件加载器
+│   ├── skills/                   # Skills 模块
+│   │   ├── config.py             # 配置管理
+│   │   ├── executor.py           # Skill 执行器
+│   │   ├── loader.py             # Skill 发现与加载
+│   │   ├── manager.py            # Skill 管理器
+│   │   ├── models.py             # 数据模型
+│   │   ├── registry.py           # Skill 注册表
+│   │   └── tool.py               # Skill 工具包装
+│   ├── web/                      # Web UI
+│   │   ├── server.py             # FastAPI 应用
+│   │   ├── routes.py             # API 路由
+│   │   ├── schemas.py            # 数据模型
+│   │   ├── ws_manager.py         # WebSocket 管理
+│   │   └── static/               # 前端静态文件
 │   └── cli/                      # CLI 界面
 │       ├── app.py                # REPL 入口
 │       ├── renderer.py           # Rich 渲染器
 │       ├── session.py            # 会话管理器
 │       └── cost_tracker.py       # Token 用量追踪
 └── tests/                        # 验证测试
-    ├── validate_p0.py            # P0: 骨架 (7 tests)
-    ├── validate_p1.py            # P1: 工具 (9 tests)
-    ├── validate_p2.py            # P2: 安全 (6 tests)
-    ├── validate_p3.py            # P3: 增强工具 (7 tests)
-    ├── validate_p4.py            # P4: 记忆 (5 tests)
-    ├── validate_p5.py            # P5: 上下文 (5 tests)
-    └── validate_p6p7.py          # P6+P7: 提示词/规划器/插件 (5 tests)
 ```
 
 ---
@@ -175,7 +179,7 @@ Zclaw/
     ┌────────────┐ ┌────────────┐   ┌────────────────┐
     │  LLM 层     │ │  工具系统   │   │  上下文管理     │
     │  Router     │ │  Registry  │   │  ContextManager │
-    │  Provider   │ │  9 tools   │   │  TokenBudget    │
+    │  Provider   │ │  28 tools  │   │  TokenBudget    │
     │  Fallback   │ │  Cache     │   │  Compressor     │
     └────────────┘ └────────────┘   └────────────────┘
 ```
@@ -276,7 +280,7 @@ CLI 参数 > 环境变量 > 项目级 .Zclaw.yaml > 全局 ~/.Zclaw/config.yaml 
 #### 3.2.1 数据模型 (`models.py`)
 
 | 类 | 描述 |
-|---|------|
+|---|---|
 | `Message` | 聊天消息，包含 role, content, tool_calls, tool_call_id；可序列化为 OpenAI 格式 |
 | `Response` | LLM 响应，包含 content, tool_calls, finish_reason, usage |
 | `ToolCall` | 工具调用请求（id, name, arguments） |
@@ -384,7 +388,7 @@ for tc in sequential: await execute(tc)
 
 ```python
 self._llm = LLMRouter(settings.llm)
-self._tools = ToolRegistry()           # + 注册 9 个内置工具
+self._tools = ToolRegistry()           # + 注册 28 个内置工具
 self._plugin_loader = PluginLoader()   # + 加载插件工具
 self._permissions = PermissionManager()
 self._audit = AuditLogger()
@@ -408,7 +412,7 @@ self._loop = AgentLoop(...)            # 将以上模块注入循环
     goal: str                           # 计划目标
     steps: list[PlanStep]               # 步骤列表
     status: str                         # active / completed / abandoned
-    
+
     def advance() -> PlanStep           # 推进到下一步
     def fail_current(error)             # 标记当前步骤失败
     def format_status() -> str          # 格式化为可读文本
@@ -434,7 +438,7 @@ class BaseTool:
     description: str                    # 给 LLM 看的描述
     parameters: list[ToolParameter]     # 参数定义
     metadata: ToolMetadata              # 元数据（category, danger_level, timeout）
-    
+
     async def execute(**kwargs) -> ToolResult  # 子类实现
     def to_openai_tool() -> dict                # 转换为 OpenAI function schema
 ```
@@ -471,7 +475,7 @@ cache.put(tool_name, args, result)  # 写入
 - **只缓存**: 成功的 safe 工具结果
 - **统计**: hits/misses/evictions/hit_rate
 
-#### 3.4.4 内置工具 (9 个)
+#### 3.4.4 内置工具 (28 个)
 
 | 工具 | 类别 | 危险等级 | 功能 |
 |------|------|---------|------|
@@ -479,11 +483,30 @@ cache.put(tool_name, args, result)  # 写入
 | `file_write` | file | confirm | 创建新文件或完全覆盖 |
 | `file_edit` | file | confirm | 精确替换文件中的旧文本为新文本 |
 | `multi_edit` | file | confirm | 对同一文件原子执行多处替换 |
+| `line_edit` | file | confirm | 按行号范围替换/插入/删除 |
+| `line_read` | file | safe | 按行号范围读取，显示行号 |
+| `diff` | file | safe | 文本/文件差异比较（unified/并排格式） |
+| `snapshot` | file | confirm | 文件快照管理（save/list/restore/delete） |
 | `directory` | search | safe | 列出目录内容（隐藏文件跳过） |
 | `file_search` | search | safe | 按文件名或内容搜索文件 |
 | `grep` | search | safe | 正则表达式搜索，支持 include/exclude glob、上下文行 |
 | `glob` | search | safe | Glob 模式匹配查找文件（如 `**/*.py`） |
 | `shell` | system | confirm/dangerous | 执行 Shell 命令，动态检测危险模式 |
+| `git_diff` | git | safe | diff unstaged/staged/commit/file |
+| `git_commit` | git | confirm | add + commit + amend |
+| `git_log` | git | safe | 提交历史，支持作者/日期/分支过滤 |
+| `git_status` | git | safe | 仓库状态 |
+| `git_branch` | git | confirm | 分支管理 |
+| `git_show` | git | safe | 提交详情 |
+| `git_blame` | git | safe | 行级修改信息 |
+| `code_structure` | ast | safe | AST 代码结构分析（brief/normal/full） |
+| `symbol_find` | ast | safe | 按名称查找符号定义 |
+| `symbol_edit` | ast | confirm | 按符号名称精确替换 |
+| `import_analyze` | ast | safe | 导入依赖分析 + 未使用检测 |
+| `search_conversation_history` | memory | safe | 搜索历史对话 |
+| `get_session_history` | memory | safe | 获取特定会话历史 |
+| `update_memory` | memory | safe | 更新持久化记忆 |
+| `set_preference` | memory | safe | 设置用户偏好 |
 
 **Multi-edit 原子性**: 先 dry-run 验证所有 `old_text` 都存在，全部验证通过才写入，否则不修改文件（零副作用）。
 
@@ -521,14 +544,6 @@ class DangerLevel(str, Enum):
     CONFIRM = "confirm" # 需用户确认
     DANGEROUS = "dangerous"  # 始终确认
 ```
-
-内置工具危险等级：
-
-| 工具 | 等级 | 说明 |
-|------|------|------|
-| `file_read`, `grep`, `glob`, `directory` | safe | 只读操作 |
-| `shell`, `file_write`, `file_edit`, `git_commit` | confirm | 需确认 |
-| 高危系统命令 | dangerous | 始终确认 |
 
 #### 3.6.2 权限管理器 (PermissionManager)
 
@@ -653,40 +668,7 @@ def sanitize(text):
 
 **自动脱敏**: `password`, `token`, `api_key`, `secret`, `private_key` 等字段。
 
-#### 3.6.8 安全集成架构
-
-```
-┌─────────────────────────────────────────────────────────────────┐
-│                         CLI / REPL                               │
-│  ┌─────────────┐  ┌─────────────┐  ┌─────────────────────────┐ │
-│  │  app.py     │  │  renderer.py│  │  permission callback     │ │
-│  └─────────────┘  └─────────────┘  └─────────────────────────┘ │
-└─────────────────────────────────────────────────────────────────┘
-                              │
-                              ▼
-┌─────────────────────────────────────────────────────────────────┐
-│                         Agent                                    │
-│  ┌─────────────┐  ┌─────────────┐  ┌─────────────────────────┐ │
-│  │  chat_stream│  │ Permission  │  │ AuditLogger             │ │
-│  │             │  │ Manager      │  │                         │ │
-│  └─────────────┘  └─────────────┘  └─────────────────────────┘ │
-└─────────────────────────────────────────────────────────────────┘
-                              │
-          ┌───────────────────┼───────────────────┐
-          ▼                   ▼                   ▼
-┌─────────────────┐ ┌─────────────────┐ ┌─────────────────┐
-│  Validator      │ │ Permission      │ │ AuditLogger     │
-│  (输入/输出校验) │ │ Manager         │ │ (日志记录)       │
-│                 │ │ (危险等级/路径)  │ │                 │
-│  · 路径穿越     │ │                 │ │ · JSONL 格式    │
-│  · 命令注入     │ │ · Danger Level  │ │ · 自动脱敏      │
-│  · 长度限制     │ │ · Path Restrict │ │                 │
-│  · 敏感信息脱敏 │ │ · Blocked Cmds  │ │                 │
-│  · 控制字符清理 │ │                 │ │                 │
-└─────────────────┘ └─────────────────┘ └─────────────────┘
-```
-
-#### 3.6.9 安全配置参考
+#### 3.6.8 安全配置参考
 
 ```yaml
 security:
@@ -709,26 +691,13 @@ security:
   audit_log_path: ~/.Zclaw/audit
 ```
 
-#### 3.6.10 安全子系统文件索引
-
-| 功能 | 文件路径 | 关键行号 |
-|------|----------|----------|
-| 危险等级定义 | `src/tools/base.py` | 15-19 |
-| 权限检查实现 | `src/security/permission.py` | 148-196 |
-| 路径限制实现 | `src/security/permission.py` | 210-240 |
-| 危险命令拦截 | `src/security/permission.py` | 88-93, 198-205 |
-| 输入校验 | `src/security/validator.py` | 全文 |
-| 输出清洗 | `src/security/validator.py` | 18-100 |
-| 审计日志 | `src/security/audit.py` | 全文 |
-| 安全配置 | `src/config/settings.py` | 82-95 |
-
 ---
 
-### 3.7 记忆模块 V4 (memory)
+### 3.7 记忆模块 (memory)
 
 #### 3.7.1 核心设计理念
 
-V4 架构从**"系统驱动的 RAG"**转变为**"Agent 驱动的自主探索"**：
+架构从**"系统驱动的 RAG"**转变为**"Agent 驱动的自主探索"**：
 
 - **状态与记忆分离**: 身份、偏好等全局状态是"活"的当前值，只保留最新态，强制注入；而历史对话是不可变的"档案"，按需探索
 - **极简上下文**: System Prompt 只注入绝对必要的当前状态和硬性规则，将上下文窗口留给 Agent 推理
@@ -923,7 +892,48 @@ prompt = builder.build(tool_names=["file_read", "shell"], memory_context="...")
 
 ---
 
-### 3.10 插件系统 (plugins)
+### 3.10 MCP 协议 (mcp)
+
+#### 3.10.1 数据类型 (`types.py`)
+
+| 类 | 描述 |
+|---|---|
+| `MCPServerConfig` | MCP 服务器配置（command, args, env, transport） |
+| `MCPTransportType` | 传输类型枚举（stdio, sse） |
+| `MCPToolDefinition` | MCP 工具定义（name, description, inputSchema） |
+
+#### 3.10.2 传输层 (`transport.py`)
+
+支持两种传输模式：
+
+- **StdioTransport**: 通过子进程 stdio 通信，适合本地 MCP 服务器
+- **SSETransport**: 通过 HTTP SSE 通信，适合远程 MCP 服务器
+
+#### 3.10.3 MCP 客户端 (`client.py`)
+
+`MCPClient` 实现：
+- 连接握手（initialize）
+- 工具发现（tools/list）
+- 工具调用（tools/call）
+- Ping 健康检查
+
+#### 3.10.4 工具适配器 (`adapter.py`)
+
+`MCPToolWrapper` 将 MCP 工具适配为 Zclaw 的 `BaseTool`：
+- schema 参数转换为 `ToolParameter` 列表
+- 工具执行结果转换为 `ToolResult`
+- 工具名称添加 `mcp_` 前缀避免冲突
+
+#### 3.10.5 MCP 管理器 (`manager.py`)
+
+`MCPManager` 管理所有 MCP 服务器连接：
+- 配置加载
+- 服务器连接/断开
+- 工具注册到 Agent
+
+---
+
+### 3.11 插件系统 (plugins)
 
 **文件**: `src/plugins/loader.py`
 
@@ -946,7 +956,7 @@ class MyCustomTool(BaseTool):
     description = "A custom tool"
     parameters = [ToolParameter(name="input", type="string", description="Input", required=True)]
     metadata = ToolMetadata(category="custom", danger_level=DangerLevel.SAFE)
-    
+
     async def execute(self, **kwargs) -> ToolResult:
         return ToolResult.ok(f"Result: {kwargs['input']}")
 ```
@@ -955,9 +965,92 @@ class MyCustomTool(BaseTool):
 
 ---
 
-### 3.11 CLI 界面 (cli)
+### 3.12 Skills 模块 (skills)
 
-#### 3.11.1 REPL (`app.py`)
+#### 3.12.1 核心组件
+
+| 组件 | 文件 | 职责 |
+|------|------|------|
+| `SkillsConfig` | config.py | Skill 目录配置 |
+| `SkillRegistry` | registry.py | Skill 注册表 |
+| `SkillLoader` | loader.py | 发现与加载 SKILL.md |
+| `SkillExecutor` | executor.py | Skill 执行器 |
+| `SkillManager` | manager.py | 统一管理器 |
+| `SkillTool` | tool.py | Skill 作为 Tool 包装 |
+
+#### 3.12.2 SKILL.md 格式
+
+```markdown
+---
+name: amap-lbs-skill
+description: 高德地图综合服务
+version: "1.0.0"
+metadata:
+  triggers: ["地图", "POI", "路径", "导航"]
+  requires:
+    env:
+      - AMAP_API_KEY
+    bins:
+      - curl
+  primaryEnv: AMAP_API_KEY
+  homepage: https://lbs.amap.com/
+---
+# 技能说明
+
+你的技能描述内容...
+```
+
+#### 3.12.3 核心功能
+
+| 功能 | 描述 |
+|------|------|
+| 自动匹配 | 根据触发词自动匹配相关 Skills |
+| 上下文注入 | 将匹配的 Skill 内容注入到 LLM 上下文 |
+| 依赖检查 | 自动检查环境变量和二进制程序 |
+| 热重载 | 支持重新加载 Skills |
+| 工具包装 | Skill 可作为 Tool 被 Agent 调用 |
+
+---
+
+### 3.13 Web UI (web)
+
+#### 3.13.1 Web 服务器 (`server.py`)
+
+FastAPI 应用，支持：
+- WebSocket 实时通信
+- REST API 端点
+- 静态文件服务
+
+#### 3.13.2 WebSocket 管理器 (`ws_manager.py`)
+
+| 功能 | 描述 |
+|------|------|
+| 连接管理 | 连接/断开、连接列表 |
+| 消息发送 | JSON 消息发送、广播 |
+| 权限请求/响应 | confirm/dangerous 工具的用户确认 |
+
+#### 3.13.3 API 路由 (`routes.py`)
+
+| 端点 | 方法 | 描述 |
+|------|------|------|
+| `/ws` | GET | WebSocket 连接 |
+| `/api/chat` | POST | 发送消息 |
+| `/api/files` | GET/POST | 文件操作 |
+| `/api/tools` | GET | 工具列表 |
+| `/api/sessions` | GET/POST/DELETE | 会话管理 |
+| `/api/config` | GET | 配置信息 |
+
+#### 3.13.4 前端 (`static/`)
+
+- `index.html`: 主 SPA 页面
+- `css/style.css`: 暗色主题样式
+- `js/app.js`: WebSocket 通信、Markdown 渲染
+
+---
+
+### 3.14 CLI 界面 (cli)
+
+#### 3.14.1 REPL (`app.py`)
 
 `REPL` 类实现交互式命令循环：
 
@@ -979,27 +1072,17 @@ class MyCustomTool(BaseTool):
 | `/plugin [reload\|list]` | 插件管理 |
 | `/cost` | Token 用量和费用统计 |
 | `/plan [clear]` | 查看/清除当前计划 |
+| `/mcp list\|connect\|disconnect` | MCP 管理 |
 | `/quit` `/exit` | 退出 |
 
 **非交互模式**:
 ```bash
-Zclaw --prompt "列出当前目录的文件"
+python main.py -p "列出当前目录的文件"
 ```
 
 **输入增强**: prompt-toolkit 提供命令历史（`~/.Zclaw/history`）、自动补全、`Ctrl+C` 取消。
 
-**权限确认**: 当 confirm/dangerous 工具需要执行时，弹出确认面板：
-```
-┌─ ! Permission Required (DANGEROUS) ────────────┐
-│ shell                                           │
-│                                                  │
-│   command: rm -rf /tmp/test                     │
-│                                                  │
-│   Allow? [y/N] _                                │
-└──────────────────────────────────────────────────┘
-```
-
-#### 3.11.2 渲染器 (`renderer.py`)
+#### 3.14.2 渲染器 (`renderer.py`)
 
 `Renderer` 使用 Rich 库实现美观的终端输出：
 
@@ -1011,7 +1094,7 @@ Zclaw --prompt "列出当前目录的文件"
 - 工具列表表格
 - 审计日志统计
 
-#### 3.11.3 会话管理 (`session.py`)
+#### 3.14.3 会话管理 (`session.py`)
 
 `SessionManager` 支持保存/恢复对话历史：
 
@@ -1026,7 +1109,7 @@ Zclaw --prompt "列出当前目录的文件"
 - `list_sessions()`: 列出所有会话
 - `delete(session_id)`: 删除会话
 
-#### 3.11.4 费用追踪 (`cost_tracker.py`)
+#### 3.14.4 费用追踪 (`cost_tracker.py`)
 
 `CostTracker` 记录每轮 token 使用：
 
@@ -1060,11 +1143,30 @@ tracker.get_summary()           # 格式化摘要
 | file_write | ✅ | 创建/覆盖文件 |
 | file_edit | ✅ | 精确局部替换 |
 | multi_edit | ✅ | 原子批量替换 |
+| line_edit | ✅ | 行号级编辑 |
+| line_read | ✅ | 带行号读取 |
+| diff | ✅ | unified/并排对比 |
+| snapshot | ✅ | 快照管理 |
 | directory | ✅ | 目录列表 |
 | file_search | ✅ | 文件名/内容搜索 |
 | grep | ✅ | 正则搜索 + include/exclude + 上下文 |
 | glob | ✅ | 模式匹配查找 |
 | shell | ✅ | 命令执行 + 危险检测 |
+| git_diff | ✅ | 查看差异 |
+| git_commit | ✅ | 暂存并提交 |
+| git_log | ✅ | 提交历史 |
+| git_status | ✅ | 仓库状态 |
+| git_branch | ✅ | 分支管理 |
+| git_show | ✅ | 提交详情 |
+| git_blame | ✅ | 行级修改 |
+| code_structure | ✅ | AST 分析 |
+| symbol_find | ✅ | 符号查找 |
+| symbol_edit | ✅ | 符号替换 |
+| import_analyze | ✅ | 导入分析 |
+| search_conversation_history | ✅ | 搜索历史 |
+| get_session_history | ✅ | 会话历史 |
+| update_memory | ✅ | 更新记忆 |
+| set_preference | ✅ | 设置偏好 |
 
 ### 4.3 安全特性
 
@@ -1084,124 +1186,63 @@ tracker.get_summary()           # 格式化摘要
 |------|------|------|
 | 工具结果缓存 | ✅ | LRU + TTL，只缓存 safe 工具 |
 | 并行执行 | ✅ | safe 工具 asyncio.gather 并行 |
-| 持久记忆 | ✅ | JSON 存储，4 种类型，加权检索 |
+| 持久记忆 | ✅ | L0-L4 五层分层架构 |
 | 上下文压缩 | ✅ | 自动（>80%）+ 手动（/compact） |
 | 动态 System Prompt | ✅ | Persona + 工具指南 + 记忆 + 自定义段 |
 | 任务规划 | ✅ | 步骤列表 + 进度跟踪 |
 
-### 4.5 CLI 功能
+### 4.5 扩展能力
 
-| 功能 | 状态 | 说明 |
+| 特性 | 状态 | 说明 |
 |------|------|------|
-| REPL 交互 | ✅ | prompt-toolkit，历史，补全 |
-| 非交互模式 | ✅ | `--prompt` 单次执行 |
+| MCP 协议 | ✅ | 连接外部 MCP 工具服务器 |
+| Skills 模块 | ✅ | 自动匹配、上下文注入 |
+| 插件系统 | ✅ | 自动发现 + 热重载 |
+| Web UI | ✅ | FastAPI + WebSocket |
 | 会话管理 | ✅ | save/load/delete/list |
 | 费用追踪 | ✅ | 累计 token + 估算费用 |
-| 插件系统 | ✅ | 自动发现 + 热重载 |
-| Rich 渲染 | ✅ | 主题、Markdown、表格、面板 |
 
 ---
 
-## 5. 扩展方向
+## 5. 后续开发方向
 
-### 5.1 P8: 多模态能力（高优先级）
+基于 OpenClaw 架构思想，未来重点发展方向：
 
-**当前差距**: 不支持图片理解、文件上传
+### 5.1 24 小时持续运行
 
-**扩展方案**:
-- 在 `BaseProvider` 中增加 `supports_vision` 的实际处理逻辑
-- 在 `Message` 中增加 `image_url` 字段
-- 新增 `image_analyze` 工具，调用多模态模型（如 qwen-vl）分析截图/图片
-- 支持 `file_read` 的二进制/图片模式
+**目标**: 实现无人值守的全天候 Agent 运行能力。
 
-### 5.2 P9: 语义记忆（中高优先级）
+**关键技术**:
+- **Cron 调度器**: 定时触发 Agent 执行任务
+- **Heartbeat 心跳**: 周期性唤醒 Agent 进行状态检查
+- **事件驱动**: Webhook、文件监听、API 调用触发
+- **休眠/唤醒**: 任务完成后释放资源，需要时快速恢复
 
-**当前差距**: 记忆检索只基于关键词匹配
+### 5.2 本地软件操控
 
-**扩展方案**:
-- 集成向量数据库（SQLite-VSS、ChromaDB）
-- 实现嵌入生成（使用本地模型或 API）
-- `MemoryRetriever` 增加语义检索模式
-- 支持自动记忆提取（每轮对话后 LLM 自动总结关键信息）
+**目标**: 让 Agent 能够操控本地应用程序（浏览器、Office、终端等）。
 
-### 5.3 P10: Web UI（中优先级）
+**关键技术**:
+- **Browser 自动化**: Playwright/Puppeteer 网页操作
+- **进程管理**: 启动/停止/监控本地进程
+- **屏幕截取 + VLM**: 图形界面应用的感知能力
+- **MCP 协议扩展**: 连接更多外部服务
 
-**当前差距**: 只有 CLI 界面
+### 5.3 多 Agent 架构
 
-**扩展方案**:
-- 使用 FastAPI + WebSocket 提供 Web API
-- 前端使用 React/Next.js 或 Gradio
-- 实时流式输出（SSE 或 WebSocket）
-- 文件浏览器面板
-- 工具执行可视化面板
+**目标**: 支持多个独立 Agent 并行工作，协调完成复杂任务。
 
-### 5.4 P11: 高级编辑能力（中优先级）
+**关键技术**:
+- **多会话管理**: 独立会话的生命周期管理
+- **Agent 间通信**: 消息队列、共享记忆
+- **子代理模式**: 主 Agent 动态生成子代理处理子任务
+- **路由分发**: 根据规则将任务分配给不同 Agent
 
-**当前差距**: file_edit 只支持简单字符串替换
+### 5.4 多通道接入
 
-**扩展方案**:
-- 行号级编辑（指定行范围替换）
-- Diff 预览（编辑前显示 diff）
-- Git 集成工具（git_diff, git_commit, git_log）
-- 语法感知编辑（利用 tree-sitter）
+**目标**: 支持 WhatsApp、Telegram、Slack、Discord 等多种消息通道。
 
-### 5.5 P12: 项目理解（中优先级）
-
-**当前差距**: 无项目级别的知识管理
-
-**扩展方案**:
-- 项目索引构建（AST 分析、依赖图、类型关系）
-- 符号级搜索（函数定义、类继承、引用关系）
-- 项目规则自动提取（从配置文件中学习 lint 规则、测试命令等）
-- `.zclawrules` 项目配置文件（类似 Claude Code 的 CLAUDE.md）
-
-### 5.6 P13: 多 Agent 协作（低优先级）
-
-**扩展方案**:
-- Agent 拆分为专门角色（编码 Agent、测试 Agent、审查 Agent）
-- 任务分发器（复杂任务拆分后并行分配给不同 Agent）
-- Agent 间通信协议
-- 结果合并与冲突解决
-
-### 5.7 P14: 增强安全（持续改进）
-
-**扩展方案**:
-- Docker 容器沙箱（命令在隔离容器中执行）
-- 网络访问控制（限制工具的网络请求）
-- 磁盘写入预览（file_write 前显示 diff）
-- 成本控制（设置每轮/每日最大 token 限额）
-- 多用户支持（用户认证和隔离）
-
-### 5.8 P15: 性能优化（持续改进）
-
-**扩展方案**:
-- Token 计数优化（使用 tiktoken 精确计算替代字符估算）
-- 增量上下文（只发送变化的消息，而非全量）
-- 工具执行超时分级（不同工具不同默认超时）
-- 异步文件 I/O（aiofiles 替代同步读写）
-- 会话持久化（自动保存对话，崩溃恢复）
-
-### 5.9 P16: 测试与质量
-
-**扩展方案**:
-- 单元测试覆盖（pytest + pytest-asyncio）
-- 集成测试（mock LLM 响应的端到端测试）
-- 性能基准测试（工具执行延迟、内存占用）
-- CI/CD 集成（自动测试、版本发布）
-
-### 5.10 其他可能方向
-
-| 方向 | 说明 |
-|------|------|
-| MCP 协议支持 | 实现 Model Context Protocol，接入外部工具服务器 |
-| 自然语言工具定义 | 用 LLM 将自然语言描述转换为工具 schema |
-| 多语言 CLI | 支持中英文切换 |
-| TTS 语音输出 | 集成语音合成，语音播报结果 |
-| Agent 市场 | 插件分享平台，用户可下载社区工具 |
-| IDE 集成 | VS Code / JetBrains 插件 |
-| 代码审查模式 | 专门的 code review 流程 |
-| 文档生成 | 自动生成 README、API 文档 |
-
----
-
-> 本文档基于 Zclaw v0.3.0 源码分析生成。项目位于 `/home/z/my-project/download/Zclaw/`。
+**关键技术**:
+- **Gateway 统一入口**: 消息归一化处理
+- **通道适配器**: 各平台消息格式转换
+- **通道特定功能**: 支持各平台的特有交互形式

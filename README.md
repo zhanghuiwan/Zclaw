@@ -2,7 +2,7 @@
 
 # 🦀 Zclaw
 
-**类 Claude Code 的 AI 编程助手**
+**结合 Claude Code 与 OpenClaw 的 AI 编程助手**
 
 [![Python](https://img.shields.io/badge/Python-3.11+-blue.svg)](https://python.org)
 [![Version](https://img.shields.io/badge/Version-0.4.0-green.svg)]()
@@ -10,6 +10,8 @@
 
 一个用 Python 编写的 AI 编程助手，将大语言模型（LLM）与本地文件系统、Shell 环境深度结合，
 让 AI 能够像人类程序员一样读取代码、修改文件、执行命令、搜索项目，从而完成复杂的编程任务。
+
+**当前状态**: Claude Code 核心功能已基本完成，正积极开发类似 OpenClaw 的自主 Agent 能力。
 
 </div>
 
@@ -22,7 +24,7 @@
 | 🤖 **多模型支持** | 统一的 OpenAI 兼容接口，支持阿里百炼、Ollama、Azure 等任意兼容服务 |
 | 🔧 **工具调用循环** | Agent Loop 机制，LLM 可自主决定调用哪些工具、调用多少轮 |
 | 🔒 **分层安全** | 三级危险等级（safe/confirm/dangerous）+ 路径限制 + 命令拦截 + 审计日志 |
-| 🧠 **V4 持久记忆** | 分层记忆架构（L0-L4），Agent 驱动的自主探索模式，状态与历史分离 |
+| 🧠 **持久记忆** | 分层记忆架构（L0-L4），Agent 驱动的自主探索模式，状态与历史分离 |
 | 📏 **智能上下文** | 自动检测并压缩长对话，适配不同模型的 token 限制 |
 | 🔌 **插件扩展** | 用户可通过编写 Python 文件自定义工具，支持热重载 |
 | 🌐 **Web UI** | FastAPI + WebSocket 构建的现代化 Web 界面，实时流式输出 |
@@ -30,6 +32,7 @@
 | 🧩 **语法感知** | 基于 AST 的代码结构分析、符号查找、精确替换、导入分析 |
 | 🔗 **MCP 协议** | 连接外部 MCP 工具服务器，自动注册工具到 Agent |
 | 📋 **任务规划** | 复杂任务前自动生成执行计划，跟踪步骤进度 |
+| 🧩 **Skills 扩展** | 类似 Claude Code / OpenClaw，支持项目和全局 Skills 扩展 |
 | 💰 **费用追踪** | Token 用量实时统计和费用估算 |
 
 ## 🏗️ 项目结构
@@ -40,8 +43,8 @@ Zclaw/
 ├── config.example.yaml              # 配置示例
 ├── config.mcp.example.json          # MCP 配置示例
 ├── pyproject.toml                   # 项目元数据
-├── ROADMAP.md                       # 开发路线图
-├── ARCHITECTURE.md                  # 技术文档
+├── README.md                        # 项目文档
+├── ARCHITECTURE.md                  # 技术架构文档
 ├── src/
 │   ├── config/                      # 配置管理
 │   │   └── settings.py
@@ -60,7 +63,7 @@ Zclaw/
 │   │   ├── base.py                  # BaseTool + ToolResult
 │   │   ├── registry.py              # 工具注册表
 │   │   ├── cache.py                 # LRU 结果缓存
-│   │   └── builtin/                 # 内置工具 (24 个)
+│   │   └── builtin/                 # 内置工具
 │   │       ├── file_tools.py        # 文件操作
 │   │       ├── search_tools.py      # 文件搜索
 │   │       ├── shell_tool.py        # Shell 命令
@@ -77,8 +80,8 @@ Zclaw/
 │   │   ├── permission.py            # 权限管理
 │   │   ├── validator.py             # 输入/输出校验
 │   │   └── audit.py                 # 审计日志
-│   ├── memory/                      # V4 记忆模块
-│   │   ├── config.py                # V4 配置
+│   ├── memory/                      # 记忆模块
+│   │   ├── config.py                # 配置
 │   │   ├── coordinator.py           # 记忆协调器
 │   │   ├── extractor.py            # LLM 提取器
 │   │   ├── layers/                 # 分层实现
@@ -124,7 +127,7 @@ Zclaw/
 │       ├── renderer.py              # Rich 渲染
 │       ├── session.py              # 会话管理
 │       └── cost_tracker.py         # 费用追踪
-└── tests/                           # 验证测试 (104/105)
+└── tests/                           # 验证测试
 ```
 
 ## 🚀 快速开始
@@ -318,7 +321,7 @@ class MyCustomTool(BaseTool):
         ToolParameter(name="input", type="string", description="Input", required=True)
     ]
     metadata = ToolMetadata(category="custom", danger_level=DangerLevel.SAFE)
-    
+
     async def execute(self, **kwargs) -> ToolResult:
         return ToolResult.ok(f"Result: {kwargs['input']}")
 ```
@@ -350,68 +353,22 @@ Zclaw 支持 Skills 功能，遵循 Claude Code / OpenClaw 通用标准，允许
 
 ### 目录结构
 
-Skills 从以下目录加载：
-- 全局目录：`~/.zclaw/skills/`
-- 项目目录：`project_root/skills/`
+Skills 从以下目录加载，与 Claude Code / OpenClaw 兼容：
+
+| 类型 | 目录 | 说明 |
+|------|------|------|
+| 全局 | `~/.zclaw/skills/` | 所有项目共享的 Skills |
+| 项目 | `project_root/skills/` | 仅当前项目可用的 Skills |
 
 每个 Skill 放在独立目录中，包含 `SKILL.md` 定义文件。
 
-### SKILL.md 格式
-
-```markdown
----
-name: amap-lbs-skill
-description: 高德地图综合服务
-version: "1.0.0"
-metadata:
-  triggers: ["地图", "POI", "路径", "导航"]
-  requires:
-    env:
-      - AMAP_API_KEY
-    bins:
-      - curl
-  primaryEnv: AMAP_API_KEY
-  homepage: https://lbs.amap.com/
----
-# 技能说明
-
-你的技能描述内容...
-```
-
 ### 核心功能
 
-| 功能 | 描述 |
-|------|------|
-| 自动匹配 | 根据用户输入的触发词自动匹配相关 Skills |
-| 上下文注入 | 将匹配的 Skill 内容注入到 LLM 上下文 |
-| 依赖检查 | 自动检查环境变量和二进制程序是否配置 |
-| 热重载 | 支持重新加载 Skills |
-| 工具包装 | Skill 可作为 Tool 被 Agent 调用 |
-
-### 使用方式
-
-```python
-from src.skills import SkillManager, SkillsConfig
-
-config = SkillsConfig.with_defaults(project_root=PROJECT_ROOT)
-manager = SkillManager(config)
-manager.initialize()
-
-# 查询匹配的 skills
-matches = manager.match_skills("搜索附近的美食")
-
-# 执行 skill
-result = manager.execute_skill("amap-lbs-skill", "搜索西直门周边美食")
-
-# 获取注入上下文的 skill 内容
-context = manager.get_context("我想去杭州旅游")
-```
-
-### 开发新 Skill
-
-1. 在 `~/.zclaw/skills/` 或项目 `skills/` 目录下创建目录
-2. 编写 `SKILL.md` 文件，定义名称、描述、触发词和依赖
-3. SkillManager 会自动发现并加载
+- **自动匹配**: 根据触发词自动匹配相关 Skills
+- **上下文注入**: 将匹配的 Skill 内容注入到 LLM 上下文
+- **依赖检查**: 自动检查环境变量和二进制程序是否配置
+- **热重载**: 支持重新加载 Skills
+- **工具包装**: Skill 可作为 Tool 被 Agent 调用
 
 ## 🌐 Web UI
 
@@ -425,7 +382,6 @@ Zclaw 提供完整的 Web 界面：
 - 会话管理
 - 费用统计
 - 暗色主题
-- 响应式设计
 
 ```bash
 python -m src.web.server
@@ -434,7 +390,7 @@ python -m src.web.server
 
 ## 🔒 安全特性
 
-Zclaw 采用多层次安全机制，详见 [ARCHITECTURE.md](ARCHITECTURE.md#安全架构)。
+Zclaw 采用多层次安全机制，详见 [ARCHITECTURE.md](ARCHITECTURE.md)。
 
 ### 三级危险等级
 
@@ -480,21 +436,35 @@ JSONL 格式存储于 `~/.Zclaw/audit/`，自动脱敏敏感参数字段。
 
 ## 📊 开发进度
 
-| 阶段 | 内容 | 测试 |
+### 模块进度
+
+| 模块 | 功能 | 状态 |
 |------|------|------|
-| P0 | 项目骨架 | 7/7 ✅ |
-| P1 | 基础工具 + LLM | 8/9 |
-| P2 | 安全系统 | 6/6 ✅ |
-| P3 | 增强工具 + 缓存 | 7/7 ✅ |
-| P4 | 记忆模块 | 5/5 ✅ |
-| P5 | 上下文管理 | 5/5 ✅ |
-| P6 | 提示词工程 + 规划器 | 5/5 ✅ |
-| P7 | CLI 增强 + 插件系统 | 5/5 ✅ |
-| P8 | 记忆系统完善 | 5/5 ✅ |
-| P9 | MCP 协议集成 | 6/6 ✅ |
-| P10 | Web UI | 21/21 ✅ |
-| P11 | 高级编辑能力 | 29/29 ✅ |
-| **合计** | | **104/105** |
+| **配置管理** | Settings 配置加载、环境变量、YAML | ✅ 已完成 |
+| **LLM 层** | 多模型支持、OpenAI 兼容接口、Router 路由 | ✅ 已完成 |
+| **核心引擎** | Agent、Loop、State、Planner、Plan | ✅ 已完成 |
+| **工具系统** | 28 个内置工具、注册表、缓存 | ✅ 已完成 |
+| **沙箱执行** | CommandRunner 超时控制 | ✅ 已完成 |
+| **安全系统** | 权限管理、校验、审计日志 | ✅ 已完成 |
+| **记忆模块** | L0-L4 分层记忆、协调器、提取器 | ✅ 已完成 |
+| **上下文管理** | Token 预算、压缩器 | ✅ 已完成 |
+| **提示词工程** | 模板库、PromptBuilder | ✅ 已完成 |
+| **插件系统** | PluginLoader 热重载 | ✅ 已完成 |
+| **Skills 模块** | SkillManager、自动匹配、上下文注入 | ✅ 已完成 |
+| **MCP 协议** | MCPClient、Transport、Adapter、Manager | ✅ 已完成 |
+| **Web UI** | FastAPI + WebSocket、实时流式 | ✅ 已完成 |
+| **CLI 界面** | REPL、Rich 渲染、会话管理 | ✅ 已完成 |
+
+### 后续开发方向
+
+基于 OpenClaw 架构思想，未来重点发展方向：
+
+| 方向 | 说明 |
+|------|------|
+| **24 小时持续运行** | Cron 调度器、Heartbeat 心跳机制、事件驱动触发 |
+| **本地软件操控** | Browser 自动化（Playwright）、进程管理、屏幕截取 |
+| **多 Agent 架构** | 多会话管理、Agent 间通信、子代理模式 |
+| **多通道接入** | WhatsApp/Telegram/Slack/Discord 等消息通道 |
 
 ## 📄 许可证
 
