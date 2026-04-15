@@ -146,14 +146,19 @@ def _find_env_file() -> Path | None:
     """查找 .env 文件。
 
     查找顺序：
-    1. 项目根目录（settings.py 上两级目录）
-    2. ~/.Zclaw/.env
+    1. 当前工作目录 (.env)
+    2. 项目根目录（settings.py 上两级目录）
+    3. ~/.Zclaw/.env
     """
-    # 1. 项目根目录（基于 settings.py 的位置）
+    # 1. 当前工作目录
+    p = Path.cwd() / ".env"
+    if p.exists():
+        return p
+    # 2. 项目根目录（基于 settings.py 的位置）
     p = Path(__file__).resolve().parent.parent / ".env"
     if p.exists():
         return p
-    # 2. ~/.Zclaw/.env
+    # 3. ~/.Zclaw/.env
     p = Path.home() / ".Zclaw" / ".env"
     if p.exists():
         return p
