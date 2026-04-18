@@ -71,10 +71,18 @@ class OpenAICompatProvider(BaseProvider):
         tool_calls = []
         if choice.message.tool_calls:
             for tc in choice.message.tool_calls:
+                args_str = tc.function.arguments or "{}"
+                # 尝试解析，如果失败则用空对象（避免 MiniMax API 返回畸形 JSON 的问题）
+                try:
+                    import json
+                    json.loads(args_str)
+                except (json.JSONDecodeError, TypeError):
+                    logger.warning(f"LLM 返回了无效的 tool arguments，已替换为空对象: {repr(args_str)[:100]}")
+                    args_str = "{}"
                 tool_calls.append(ToolCall(
                     id=tc.id,
                     name=tc.function.name,
-                    arguments=tc.function.arguments,
+                    arguments=args_str,
                 ))
 
         usage = Usage()
