@@ -355,11 +355,11 @@ class WebhookReceiver:
 
 ### P0 - 必须完成（才能启动 Gateway）
 
-- [ ] 6.1.1 实现 AgentFactory 类
-- [ ] 6.1.2 将 BrowserTool 注册到 Agent
-- [ ] 6.1.3 将 ProcessTool 注册到 Agent
-- [ ] 6.2.1 实现 Gateway 与 FastAPI 的连接
-- [ ] 6.2.2 实现 WebSocket Gateway 端点
+- [x] 6.1.1 实现 AgentFactory 类 ✅
+- [x] 6.1.2 将 BrowserTool 注册到 Agent ✅
+- [x] 6.1.3 将 ProcessTool 注册到 Agent ✅
+- [x] 6.2.1 实现 Gateway 与 FastAPI 的连接 ✅
+- [x] 6.2.2 实现 WebSocket Gateway 端点 ✅
 
 ### P1 - 重要（多通道支持）
 
@@ -494,3 +494,4 @@ Step 6: systemd 服务化 (2-3 小时)
 | 2026-04-18 | - | 项目启动，编写追踪文档 |
 | 2026-04-18 | Phase 1-5 | 完成基础架构模块 |
 | 2026-04-18 | Phase 6 | 补充文档，分析架构缺口，制定补全计划 |
+| 2026-04-18 | Phase 6 | 完成 P0 任务：AgentFactory、WebSocket Gateway 端点、工具注册 |
