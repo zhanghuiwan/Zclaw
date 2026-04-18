@@ -363,11 +363,11 @@ class WebhookReceiver:
 
 ### P1 - 重要（多通道支持）
 
-- [ ] 6.3.1 实现 Telegram 适配器
-- [ ] 6.3.2 实现 GitHub Webhook 处理
-- [ ] 6.4.1 实现 WebhookReceiver 类
-- [ ] 6.5.1 创建 systemd 服务文件
-- [ ] 6.5.2 创建 Docker 部署配置
+- [x] 6.3.1 实现 Telegram 适配器 ✅
+- [x] 6.3.2 实现 GitHub Webhook 处理 ✅
+- [x] 6.4.1 实现 WebhookReceiver 类 ✅
+- [x] 6.5.1 创建 systemd 服务文件 ✅
+- [x] 6.5.2 创建 Docker 部署配置 ✅
 
 ### P2 - 可选（增强功能）
 
@@ -495,3 +495,4 @@ Step 6: systemd 服务化 (2-3 小时)
 | 2026-04-18 | Phase 1-5 | 完成基础架构模块 |
 | 2026-04-18 | Phase 6 | 补充文档，分析架构缺口，制定补全计划 |
 | 2026-04-18 | Phase 6 | 完成 P0 任务：AgentFactory、WebSocket Gateway 端点、工具注册 |
+| 2026-04-18 | Phase 6 | 完成 P1 任务：Telegram 适配器、GitHub Webhook、WebhookReceiver、systemd/Docker 部署 |

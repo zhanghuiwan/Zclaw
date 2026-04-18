@@ -1,0 +1,32 @@
+[Unit]
+Description=Zclaw Gateway - 24/7 Autonomous Agent
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=%u
+WorkingDirectory=%h/zclaw
+Environment=PYTHONPATH=%h/zclaw
+ExecStart=/usr/bin/python3 -m src.web.gateway_server
+Restart=always
+RestartSec=10
+StandardOutput=journal
+StandardError=journal
+
+# 安全设置
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=%h/.Zclaw %h/zclaw/agents
+
+# 资源限制
+LimitNOFILE=65536
+MemoryMax=1G
+
+# 开机自启
+WantedBy=default.target
+
+[Install]
+WantedBy=default.target
