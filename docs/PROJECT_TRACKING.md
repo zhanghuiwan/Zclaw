@@ -218,8 +218,279 @@ tests/
 | 日期 | 阶段 | 更新内容 |
 |------|------|---------|
 | 2026-04-18 | - | 项目启动，编写追踪文档 |
-| 2026-04-18 | Phase 1 | 完成 Channel/Brain/Body 三层架构基础实现 |
-| 2026-04-18 | Phase 2 | 完成 24 小时持续运行核心功能验证 |
-| 2026-04-18 | Phase 3 | 完成浏览器自动化 (Playwright) |
-| 2026-04-18 | Phase 4 | 完成进程管理和文件监听 |
-| 2026-04-18 | Phase 5 | 完成多 Agent 架构所有阶段 |
+| 2026-04-18 | Phase 1-5 | 完成基础架构模块 |
+| 2026-04-18 | Phase 6 | 补充文档，分析架构缺口 |
+
+---
+
+## Phase 6：架构补全与 24 小时运行接入
+
+**目标**: 完成 Gateway 与现有 Agent 的连接，实现真正的 24 小时自主运行
+
+### 当前架构缺口分析
+
+```
+现有架构（已完成）:
+┌─────────────────────────────────────────────────────┐
+│                    Gateway                            │
+│  (已实现: 消息路由、Cron调度、心跳、Session管理)       │
+└─────────────────────────────────────────────────────┘
+           │                                        ▲
+           │  缺少连接                               │ 缺少连接
+           ▼                                        │
+┌─────────────────────────────────────────────────────┐
+│              Agent Core (现有 src/core/agent.py)     │
+│  (已实现: chat(), tools, memory, skills)          │
+└─────────────────────────────────────────────────────┘
+           │
+           ▼
+┌─────────────────────────────────────────────────────┐
+│              Tool Registry (现有)                    │
+│  + 新增 BrowserTool, ProcessTool                   │
+└─────────────────────────────────────────────────────┘
+```
+
+### 缺口列表
+
+| 缺口 | 优先级 | 说明 |
+|------|--------|------|
+| 6.1 AgentFactory 连接 | P0 | 将 Gateway 与现有 Agent 类连接 |
+| 6.2 FastAPI Webhook 入口 | P0 | 接收外部请求（HTTP/WebSocket）|
+| 6.3 多通道适配器完善 | P1 | Telegram/WhatsApp/Slack Webhook |
+| 6.4 WebhookReceiver | P1 | 接收外部事件触发 |
+| 6.5 启动脚本/服务化 | P1 | systemd/Docker 部署配置 |
+| 6.6 现有工具注册到新架构 | P0 | 将 BrowserTool/ProcessTool 注册到 Agent |
+
+### 6.1 AgentFactory 连接（最优先）
+
+**问题**: Gateway 的 `set_agent_factory()` 需要一个异步工厂函数，但尚未实现。
+
+**目标**: 实现 `agent_factory(agent_id: str) -> Agent`
+
+```python
+# 目标：在 Gateway 中调用
+agent = await self._agent_factory("default")
+
+# 需要实现：
+# 1. 从 agents/default/ 目录加载配置
+# 2. 创建 Agent 实例并注入配置
+# 3. 注册 BrowserTool, ProcessTool 等新工具
+```
+
+**文件**: 需要在 `src/channel/gateway.py` 或新文件 `src/brain/agent_factory.py` 中实现
+
+### 6.2 FastAPI Webhook 入口
+
+**问题**: Gateway 没有 HTTP/WebSocket 入口，无法接收外部请求。
+
+**目标**: 在 `src/web/` 基础上增加与 Gateway 的集成
+
+**文件**: `src/web/gateway_integration.py`
+
+```python
+# 需要的端点:
+POST /webhook/telegram     # Telegram Bot API
+POST /webhook/github       # GitHub Webhook
+POST /webhook/gcal        # Google Calendar
+WS   /ws/gateway          # WebSocket 连接到 Gateway
+GET  /api/gateway/status   # Gateway 状态查询
+```
+
+### 6.3 多通道适配器完善
+
+**问题**: 只有 WebSocket 适配器，其他通道未实现。
+
+**目标**: 实现各通道的 Webhook 接收
+
+| 通道 | 优先级 | Webhook 格式 |
+|------|--------|--------------|
+| Telegram | P1 | `POST /webhook/telegram` + Bot API |
+| WhatsApp | P2 | Cloud API Webhook |
+| Slack | P2 | `POST /webhook/slack` Events API |
+| GitHub | P1 | `POST /webhook/github` |
+
+**文件**: `src/channel/channels/telegram.py` 等
+
+### 6.4 WebhookReceiver
+
+**目标**: 统一接收外部 Webhook 事件
+
+**文件**: `src/body/webhook.py`
+
+```python
+class WebhookReceiver:
+    """Webhook 事件接收器"""
+    
+    async def handle_github(self, payload: dict) -> None:
+        """处理 GitHub Webhook"""
+        
+    async def handle_gcal(self, payload: dict) -> None:
+        """处理 Google Calendar 事件"""
+        
+    async def handle_file_change(self, event: FileWatchEvent) -> None:
+        """处理文件变化事件"""
+```
+
+### 6.5 启动脚本/服务化
+
+**目标**: 提供生产环境部署方案
+
+**文件**:
+- `scripts/start_gateway.py` - 直接启动脚本
+- `deploy/systemd/zclaw-gateway.service` - systemd 服务配置
+- `Dockerfile.gateway` - Docker 镜像
+- `docker-compose.yml` - 完整部署
+
+### 6.6 现有工具注册到新架构
+
+**问题**: BrowserTool, ProcessTool 需要注册到 Agent 的 ToolRegistry
+
+**目标**: 在 Agent 初始化时加载新工具
+
+**文件**: `src/core/agent.py` 或 `src/tools/registry.py`
+
+---
+
+## 待开发子任务
+
+### P0 - 必须完成（才能启动 Gateway）
+
+- [ ] 6.1.1 实现 AgentFactory 类
+- [ ] 6.1.2 将 BrowserTool 注册到 Agent
+- [ ] 6.1.3 将 ProcessTool 注册到 Agent
+- [ ] 6.2.1 实现 Gateway 与 FastAPI 的连接
+- [ ] 6.2.2 实现 WebSocket Gateway 端点
+
+### P1 - 重要（多通道支持）
+
+- [ ] 6.3.1 实现 Telegram 适配器
+- [ ] 6.3.2 实现 GitHub Webhook 处理
+- [ ] 6.4.1 实现 WebhookReceiver 类
+- [ ] 6.5.1 创建 systemd 服务文件
+- [ ] 6.5.2 创建 Docker 部署配置
+
+### P2 - 可选（增强功能）
+
+- [ ] 6.3.3 实现 WhatsApp 适配器
+- [ ] 6.3.4 实现 Slack 适配器
+
+---
+
+## 启动 24 小时运行的步骤
+
+### 1. 加载 Agent 配置
+```python
+from src.brain.agent_factory import AgentFactory
+
+factory = AgentFactory()
+await factory.load_agents_from_directory("agents")
+```
+
+### 2. 连接到 Gateway
+```python
+gateway.set_agent_factory(factory.create_agent)
+```
+
+### 3. 启动 Web 服务
+```python
+# 接收 Telegram/Slack 等通道的消息
+from src.web.gateway_server import start_gateway_server
+await start_gateway_server(gateway)
+```
+
+### 4. Gateway 主循环
+```python
+await gateway.start()
+await gateway.wait_for_shutdown()
+```
+
+---
+
+## 架构现状图
+
+```
+                    外部请求
+                        │
+                        ▼
+┌─────────────────────────────────────────────────────────────────┐
+│                     FastAPI Web Server (src/web/)                │
+│  ┌──────────┐  ┌──────────┐  ┌──────────┐  ┌──────────┐       │
+│  │ Telegram │  │  GitHub  │  │ WebSocket│  │  REST    │       │
+│  │ Webhook  │  │  Webhook │  │  端点    │  │   API    │       │
+│  └────┬─────┘  └────┬─────┘  └────┬─────┘  └────┬─────┘       │
+└───────┼─────────────┼─────────────┼─────────────┼──────────────┘
+        │             │             │             │
+        └─────────────┴──────┬──────┴─────────────┘
+                             │
+                             ▼
+                    ┌────────────────┐
+                    │    Gateway      │
+                    │  (已实现)       │
+                    └────────┬───────┘
+                             │
+            ┌────────────────┼────────────────┐
+            │                │                │
+            ▼                ▼                ▼
+    ┌──────────────┐ ┌──────────────┐ ┌──────────────┐
+    │ CronScheduler │ │HeartbeatMgr │ │SessionMgr    │
+    └──────────────┘ └──────────────┘ └──────────────┘
+                             │
+                             ▼
+                    ┌────────────────┐
+                    │  AgentFactory │ ◄── 缺失
+                    └────────┬───────┘
+                             │
+                             ▼
+                    ┌────────────────┐
+                    │     Agent      │ ◄── 现有 src/core/agent.py
+                    │   (已实现)     │
+                    └────────┬───────┘
+                             │
+            ┌────────────────┼────────────────┐
+            │                │                │
+            ▼                ▼                ▼
+    ┌──────────────┐ ┌──────────────┐ ┌──────────────┐
+    │ ToolRegistry │ │   Memory     │ │    LLM      │
+    │ (需扩展)     │ │  Coordinator │ │   Router    │
+    └──────────────┘ └──────────────┘ └──────────────┘
+            │
+            ▼
+    ┌──────────────┐ ┌──────────────┐ ┌──────────────┐
+    │ BrowserTool  │ │ ProcessTool  │ │  其他工具   │
+    │ (已实现)     │ │ (已实现)     │ │              │
+    └──────────────┘ └──────────────┘ └──────────────┘
+```
+
+---
+
+## 实施顺序建议
+
+```
+Step 1: 实现 AgentFactory (2-3 小时)
+  └─ 连接到 Gateway
+
+Step 2: 实现 WebSocket Gateway 端点 (2-3 小时)  
+  └─ FastAPI + Gateway 集成
+
+Step 3: 注册新工具到 Agent (1-2 小时)
+  └─ BrowserTool, ProcessTool
+
+Step 4: 测试完整流程 (2-3 小时)
+  └─ 启动 Gateway，发送消息，验证响应
+
+Step 5: 实现 Telegram 适配器 (4-6 小时)
+  └─ Webhook 接收 + Bot API 发送
+
+Step 6: systemd 服务化 (2-3 小时)
+  └─ 生产环境部署
+```
+
+---
+
+## 更新日志
+
+| 日期 | 阶段 | 更新内容 |
+|------|------|---------|
+| 2026-04-18 | - | 项目启动，编写追踪文档 |
+| 2026-04-18 | Phase 1-5 | 完成基础架构模块 |
+| 2026-04-18 | Phase 6 | 补充文档，分析架构缺口，制定补全计划 |
