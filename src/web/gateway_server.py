@@ -332,7 +332,7 @@ async def wakeup_session(session_id: str):
 # 创建 FastAPI 应用（带 Gateway）
 # ──────────────────────────────────────────────
 
-def create_gateway_app(
+async def create_gateway_app(
     agents_dir: str | Path = "agents",
     storage_path: str = ".Zclaw",
 ) -> tuple[Any, Gateway]:
@@ -350,7 +350,7 @@ def create_gateway_app(
     from fastapi.middleware.cors import CORSMiddleware
 
     # 初始化 Gateway
-    gateway = asyncio.run(initialize_gateway(agents_dir, storage_path))
+    gateway = await initialize_gateway(agents_dir, storage_path)
 
     app = FastAPI(
         title="Zclaw Gateway",
@@ -390,7 +390,7 @@ async def start_gateway_server(
     """
     import uvicorn
 
-    app, gateway = create_gateway_app(agents_dir, storage_path)
+    app, gateway = await create_gateway_app(agents_dir, storage_path)
 
     # 启动 Gateway 主循环（但不阻塞）
     asyncio.create_task(gateway.start())
