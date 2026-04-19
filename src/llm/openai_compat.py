@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 from typing import Any, AsyncIterator
 
 from openai import AsyncOpenAI
@@ -26,6 +27,29 @@ from src.llm.models import (
 )
 
 logger = logging.getLogger(__name__)
+
+def strip_think_content(text):
+    """Remove think tags from text for models like MiniMax."""
+    if not text:
+        return text
+    result = text
+    # Handle both <_think>...</_think> and <think>...</think> formats
+    tags = [
+        ('<_think>', '</_think>'),
+        ('<think>', '</think>'),
+    ]
+    for open_tag, close_tag in tags:
+        while True:
+            start = result.find(open_tag)
+            if start == -1:
+                break
+            end = result.find(close_tag, start)
+            if end == -1:
+                break
+            result = result[:start] + result[end+len(close_tag):]
+    return result.strip()
+
+
 
 
 class OpenAICompatProvider(BaseProvider):
@@ -67,6 +91,7 @@ class OpenAICompatProvider(BaseProvider):
 
         choice = response.choices[0]
         content = choice.message.content or ""
+        content = strip_think_content(content)
 
         tool_calls = []
         if choice.message.tool_calls:
@@ -79,6 +104,8 @@ class OpenAICompatProvider(BaseProvider):
                 except (json.JSONDecodeError, TypeError):
                     logger.warning(f"LLM 返回了无效的 tool arguments，已替换为空对象: {repr(args_str)[:100]}")
                     args_str = "{}"
+                # MiniMax 可能在 arguments 中也输出 think 标签，需要移除
+                args_str = strip_think_content(args_str)
                 tool_calls.append(ToolCall(
                     id=tc.id,
                     name=tc.function.name,
@@ -136,10 +163,12 @@ class OpenAICompatProvider(BaseProvider):
 
                 # 内容增量
                 if delta.content:
-                    yield StreamEvent(
-                        type=StreamEventType.CONTENT_DELTA,
-                        data=delta.content,
-                    )
+                    filtered = strip_think_content(delta.content)
+                    if filtered:
+                        yield StreamEvent(
+                            type=StreamEventType.CONTENT_DELTA,
+                            data=filtered,
+                        )
 
                 # 工具调用增量
                 if delta.tool_calls:
@@ -178,13 +207,15 @@ class OpenAICompatProvider(BaseProvider):
                 if finish_reason and finish_reason != "null":
                     if finish_reason == "tool_calls" and delta.tool_calls:
                         for tc_delta in delta.tool_calls:
+                            args = tc_delta.function.arguments if tc_delta.function else ""
+                            args = strip_think_content(args)
                             yield StreamEvent(
                                 type=StreamEventType.TOOL_CALL_END,
                                 data={
                                     "index": tc_delta.index,
                                     "id": tc_delta.id or "",
                                     "name": tc_delta.function.name if tc_delta.function else "",
-                                    "arguments": tc_delta.function.arguments if tc_delta.function else "",
+                                    "arguments": args,
                                 },
                             )
 

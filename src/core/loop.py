@@ -388,20 +388,10 @@ class AgentLoop:
                 tool_calls_list: list[ToolCall] = []
                 for idx in sorted(tool_calls_buffer.keys()):
                     buf = tool_calls_buffer[idx]
-                    args_str = buf["arguments"]
-                    # 验证 arguments 是有效 JSON，无效则替换为空对象（防止 LLM API 返回畸形 JSON）
-                    if args_str:
-                        try:
-                            json.loads(args_str)
-                        except json.JSONDecodeError:
-                            logger.warning(f"LLM 返回无效 JSON arguments，已替换: {repr(args_str)[:50]}")
-                            args_str = "{}"
-                    else:
-                        args_str = "{}"
                     tool_calls_list.append(ToolCall(
                         id=buf["id"],
                         name=buf["name"],
-                        arguments=args_str,
+                        arguments=buf["arguments"],
                     ))
                 assistant_msg = Message(
                     role=MessageRole.ASSISTANT,
