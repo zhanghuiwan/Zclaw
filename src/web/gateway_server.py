@@ -44,6 +44,7 @@ def get_gateway() -> Gateway:
 async def initialize_gateway(
     agents_dir: str | Path = "agents",
     storage_path: str = ".Zclaw",
+    enable_stdio: bool = False,
 ) -> Gateway:
     """
     初始化 Gateway 并连接所有组件。
@@ -51,22 +52,30 @@ async def initialize_gateway(
     Args:
         agents_dir: Agent 配置目录
         storage_path: 存储路径
+        enable_stdio: 是否启用 STDIO 通道
 
     Returns:
         Gateway: 初始化的 Gateway 实例
     """
-    from src.brain.agent_factory import AgentFactory
+    from src.brain.agent_pool import AgentPool
 
-    # 创建 Gateway
+    # 创建 Gateway（传入 agents_dir）
     gateway = Gateway(
         storage_path=storage_path,
         default_agent_id="default",
+        agents_dir=agents_dir,
     )
 
-    # 创建并连接 AgentFactory
-    factory = AgentFactory(agents_dir)
-    factory.load_agents_from_directory()
-    gateway.set_agent_factory(factory.create_agent)
+    # 创建并连接 AgentPool
+    pool = AgentPool(agents_dir=agents_dir)
+    gateway.set_agent_pool(pool)
+
+    # 注册 STDIO 通道（如果启用）
+    if enable_stdio:
+        from src.channel.channels.stdio import StdioChannel
+        stdio_channel = StdioChannel()
+        gateway.register_channel(stdio_channel)
+        logger.info("STDIO 通道已注册")
 
     # 加载 Cron 任务
     await gateway.load_cron_from_agents_config(agents_dir)
@@ -178,10 +187,11 @@ async def _handle_gateway_chat(
     我们需要通过 Agent.chat_stream 来实现流式响应。
     """
     gateway = get_gateway()
+    agent = None
 
     try:
         # 获取 Agent
-        agent = await gateway._agent_factory(agent_id)
+        agent = await gateway._agent_pool.get_agent(agent_id)
 
         # 使用 Agent 的流式接口
         async for event in agent.chat_stream(message):
@@ -250,6 +260,10 @@ async def _handle_gateway_chat(
             "type": "done",
             "data": None,
         })
+    finally:
+        # 释放 Agent
+        if agent is not None and gateway._agent_pool:
+            await gateway._agent_pool.release_agent(agent_id)
 
 
 async def _handle_gateway_command(conn_id: str, data: dict[str, Any]) -> None:
@@ -266,14 +280,13 @@ async def _handle_gateway_command(conn_id: str, data: dict[str, Any]) -> None:
         })
 
     elif command == "reload":
-        # 重新加载 Agent 配置
-        from src.brain.agent_factory import AgentFactory
-        factory = AgentFactory("agents")
-        factory.load_agents_from_directory()
-        gateway.set_agent_factory(factory.create_agent)
+        # 重新加载 Agent 配置（创建新的 AgentPool）
+        from src.brain.agent_pool import AgentPool
+        pool = AgentPool(agents_dir="agents")
+        gateway.set_agent_pool(pool)
         await _ws_manager.send_json(conn_id, {
             "type": "info",
-            "data": {"message": f"已重新加载 {len(factory.list_agents())} 个 Agent"},
+            "data": {"message": f"已重新加载 AgentPool"},
         })
 
     elif command == "cron":
@@ -407,6 +420,66 @@ async def start_gateway_server(
     )
     server = uvicorn.Server(config)
     await server.serve()
+
+
+async def start_gateway_stdio(
+    agents_dir: str | Path = "agents",
+    storage_path: str = ".Zclaw",
+) -> None:
+    """
+    启动 Gateway STDIO 模式（交互式 CLI）。
+
+    Args:
+        agents_dir: Agent 配置目录
+        storage_path: 存储路径
+    """
+    from src.channel.channels.stdio import StdioChannel
+
+    # 初始化 Gateway（启用 STDIO）
+    gateway = await initialize_gateway(
+        agents_dir=agents_dir,
+        storage_path=storage_path,
+        enable_stdio=True,
+    )
+
+    # 启动 Gateway
+    await gateway.start()
+
+    # 获取 STDIO 通道
+    stdio_channel = gateway.get_channel("stdio")
+    if not stdio_channel:
+        logger.error("STDIO 通道未注册")
+        return
+
+    logger.info("Gateway STDIO 模式已启动，输入 /quit 退出")
+
+    # 主循环
+    try:
+        while gateway.is_running:
+            # 读取用户输入
+            user_input = await stdio_channel.read_line(" > ")
+            if user_input is None:
+                break
+
+            # 处理命令
+            if user_input.strip() == "/quit":
+                break
+
+            # 通过 Gateway 处理消息
+            response = await gateway.handle_message(
+                channel_name="stdio",
+                raw_message={"text": user_input},
+            )
+
+            # 发送响应
+            if response:
+                await stdio_channel.send(response)
+
+    except KeyboardInterrupt:
+        logger.info("收到键盘中断")
+    finally:
+        await gateway.shutdown()
+        logger.info("Gateway STDIO 模式已关闭")
 
 
 if __name__ == "__main__":

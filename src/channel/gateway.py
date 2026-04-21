@@ -38,16 +38,20 @@ class Gateway:
     - Session 管理
     - Cron 调度
     - Heartbeat 心跳
-    - Agent 生命周期管理
+    - Agent 生命周期管理（通过 AgentPool）
     """
 
     def __init__(
         self,
         storage_path: str = ".Zclaw",
         default_agent_id: str = "default",
+        agents_dir: str | Path = "agents",
+        max_idle_seconds: int = 1800,
+        max_agent_instances: int = 10,
     ):
         self._storage_path = Path(storage_path).expanduser().resolve()
         self._default_agent_id = default_agent_id
+        self._agents_dir = Path(agents_dir)
 
         # 初始化组件
         self._router = MessageRouter(default_agent_id=default_agent_id)
@@ -79,12 +83,14 @@ class Gateway:
 
         # 处理器
         self._message_handlers: list[callable] = []
-        self._agent_factory: callable | None = None
+
+        # AgentPool（替代原来的 AgentFactory）
+        self._agent_pool: Any = None
 
         # 注册信号处理
         self._setup_signal_handlers()
 
-        logger.info(f"Gateway 初始化完成，存储路径: {self._storage_path}")
+        logger.info(f"Gateway 初始化完成，存储路径: {self._storage_path}, agents目录: {self._agents_dir}")
 
     def _setup_signal_handlers(self) -> None:
         """设置信号处理器"""
@@ -241,14 +247,19 @@ class Gateway:
         """注册消息处理器"""
         self._message_handlers.append(handler)
 
-    def set_agent_factory(self, factory: callable) -> None:
+    def set_agent_pool(self, pool: Any) -> None:
         """
-        设置 Agent 工厂函数。
+        设置 AgentPool 实例。
 
         Args:
-            factory: 异步函数，签名: async def factory(agent_id: str) -> Agent
+            pool: AgentPool 实例
         """
-        self._agent_factory = factory
+        self._agent_pool = pool
+
+    @property
+    def agent_pool(self) -> Any:
+        """获取 AgentPool 实例"""
+        return self._agent_pool
 
     async def handle_message(
         self,
@@ -306,14 +317,17 @@ class Gateway:
                 logger.error(f"消息处理器执行失败: {e}")
 
         # 5. 如果没有处理器，使用 Agent
-        if response_text is None and self._agent_factory:
+        if response_text is None and self._agent_pool:
             try:
-                agent = await self._agent_factory(agent_id)
+                agent = await self._agent_pool.get_agent(agent_id)
                 response = await agent.chat(unified.text)
                 response_text = response.content
 
                 # 添加助手消息到会话
                 session.add_message("assistant", response_text or "")
+
+                # 释放 Agent（标记为空闲）
+                await self._agent_pool.release_agent(agent_id)
 
             except Exception as e:
                 logger.error(f"Agent 处理消息失败: {e}")
@@ -336,11 +350,13 @@ class Gateway:
         session.add_message("system", f"[Cron] {task.description}")
 
         # 调用 Agent 执行
-        if self._agent_factory:
+        if self._agent_pool:
             try:
-                agent = await self._agent_factory(task.agent_id)
+                agent = await self._agent_pool.get_agent(task.agent_id)
                 response = await agent.chat(task.command or task.description)
                 logger.info(f"Cron 任务执行完成: {task.task_id}")
+                # 释放 Agent
+                await self._agent_pool.release_agent(task.agent_id)
             except Exception as e:
                 logger.error(f"Cron 任务执行失败: {task.task_id}: {e}")
 
@@ -418,7 +434,7 @@ class Gateway:
 
     def get_status(self) -> dict[str, Any]:
         """获取 Gateway 状态"""
-        return {
+        status = {
             "running": self._running,
             "default_agent_id": self._default_agent_id,
             "channels": {
@@ -442,3 +458,9 @@ class Gateway:
             "cron": self._cron_scheduler.get_status(),
             "heartbeat": self._heartbeat_manager.get_status(),
         }
+
+        # 添加 AgentPool 状态
+        if self._agent_pool:
+            status["agent_pool"] = self._agent_pool.get_status()
+
+        return status

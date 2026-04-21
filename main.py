@@ -256,7 +256,47 @@ def main():
         default=None,
         help="非交互模式：单次提问后退出",
     )
+    parser.add_argument(
+        "--gateway",
+        action="store_true",
+        help="启动 Gateway 模式（WebSocket/HTTP 服务）",
+    )
+    parser.add_argument(
+        "--stdio",
+        action="store_true",
+        help="启动 Gateway STDIO 模式（交互式 CLI）",
+    )
+    parser.add_argument(
+        "--agents-dir",
+        type=str,
+        default="agents",
+        help="Agent 配置目录 (默认: agents)",
+    )
+    parser.add_argument(
+        "--storage",
+        type=str,
+        default=".Zclaw",
+        help="存储路径 (默认: .Zclaw)",
+    )
+    parser.add_argument(
+        "--host",
+        type=str,
+        default="0.0.0.0",
+        help="Gateway 监听地址 (默认: 0.0.0.0)",
+    )
+    parser.add_argument(
+        "--port",
+        type=int,
+        default=8080,
+        help="Gateway 监听端口 (默认: 8080)",
+    )
     args = parser.parse_args()
+
+    # 检查启动模式
+    if args.gateway or args.stdio:
+        # Gateway 模式
+        asyncio.run(_run_gateway_mode(args))
+        return
 
     # 日志配置
     level = logging.DEBUG if args.verbose else logging.WARNING
@@ -338,6 +378,57 @@ async def _single_prompt(agent: Agent, prompt: str, renderer: Renderer):
         print_error(str(e))
         sys.exit(1)
     print()  # final newline
+
+
+async def _run_gateway_mode(args) -> None:
+    """运行 Gateway 模式。"""
+    import logging
+    from src.web.gateway_server import (
+        start_gateway_server,
+        start_gateway_stdio,
+    )
+
+    # 日志配置
+    level = logging.DEBUG if args.verbose else logging.INFO
+    logging.basicConfig(
+        level=level,
+        format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
+        datefmt="%H:%M:%S",
+    )
+    logging.getLogger("openai").setLevel(logging.WARNING)
+    logging.getLogger("httpx").setLevel(logging.WARNING)
+
+    if args.stdio:
+        # STDIO 模式
+        print("=" * 60)
+        print("Zclaw Gateway - STDIO 模式")
+        print("=" * 60)
+        print(f"Agents 目录: {args.agents_dir}")
+        print(f"存储路径: {args.storage}")
+        print("输入 /quit 退出")
+        print("=" * 60)
+
+        await start_gateway_stdio(
+            agents_dir=args.agents_dir,
+            storage_path=args.storage,
+        )
+    else:
+        # WebSocket/HTTP 模式
+        print("=" * 60)
+        print("Zclaw Gateway - WebSocket/HTTP 模式")
+        print("=" * 60)
+        print(f"Agents 目录: {args.agents_dir}")
+        print(f"存储路径: {args.storage}")
+        print(f"监听地址: {args.host}:{args.port}")
+        print(f"WebSocket: ws://{args.host}:{args.port}/api/ws/gateway")
+        print("=" * 60)
+
+        await start_gateway_server(
+            agents_dir=args.agents_dir,
+            storage_path=args.storage,
+            host=args.host,
+            port=args.port,
+        )
 
 
 if __name__ == "__main__":
