@@ -380,6 +380,18 @@ async def create_gateway_app(
         allow_headers=["*"],
     )
 
+    # 根路径
+    @app.get("/")
+    async def root():
+        return {
+            "name": "Zclaw Gateway",
+            "version": "0.1.0",
+            "status": "running",
+            "docs": "/docs",
+            "websocket": "/api/ws/gateway",
+            "api": "/api/gateway/status",
+        }
+
     # 挂载路由
     app.include_router(router)
 
