@@ -273,9 +273,18 @@ class AgentPool:
 
     # ==================== Agent 获取/释放 ====================
 
-    async def get_agent(self, agent_id: str) -> Any:
+    async def acquire_agent(self, agent_id: str) -> Any:
         """
-        获取或创建 Agent 实例。
+        获取 Agent 实例（获取锁）。
+
+        必须与 release_agent 配对使用：
+        ```
+        agent = await pool.acquire_agent("default")
+        try:
+            # 使用 agent
+        finally:
+            await pool.release_agent("default")
+        ```
 
         Args:
             agent_id: Agent ID
@@ -286,50 +295,55 @@ class AgentPool:
         # 加载配置
         self._ensure_config_loaded(agent_id)
 
-        # 获取锁
+        # 获取锁（等待直到获取）
         lock = self._get_lock(agent_id)
+        await lock.acquire()
 
-        async with lock:
-            # 检查是否已存在实例
-            if agent_id in self._instances:
-                inst = self._instances[agent_id]
+        # 检查是否已存在实例
+        if agent_id in self._instances:
+            inst = self._instances[agent_id]
 
-                # 如果是休眠状态，需要唤醒（目前是重建）
-                if inst.state == AgentInstanceState.DORMANT:
-                    logger.info(f"Agent {agent_id} 从休眠状态唤醒")
-                    inst.agent = await self._create_agent_instance(agent_id)
+            # 如果是休眠状态，需要唤醒（目前是重建）
+            if inst.state == AgentInstanceState.DORMANT:
+                logger.info(f"Agent {agent_id} 从休眠状态唤醒")
+                inst.agent = await self._create_agent_instance(agent_id)
 
-                # 标记为活跃
-                inst.mark_active()
-                inst.request_count += 1
-                return inst.agent
-
-            # 检查实例数量限制
-            if self.instance_count >= self._max_instances:
-                # 尝试清理空闲实例
-                cleaned = await self.cleanup_idle()
-                if self.instance_count >= self._max_instances:
-                    # 如果仍然达到限制，报错
-                    raise RuntimeError(
-                        f"Agent 实例数已达到上限 ({self._max_instances})，"
-                        f"无法创建新实例"
-                    )
-
-            # 创建新实例
-            logger.info(f"创建新 Agent 实例: {agent_id}")
-            agent = await self._create_agent_instance(agent_id)
-
-            # 包装并存储
-            inst = AgentInstance(agent_id, agent)
+            # 标记为活跃
             inst.mark_active()
-            inst.request_count = 1
-            self._instances[agent_id] = inst
+            inst.request_count += 1
+            return inst.agent
 
-            return agent
+        # 检查实例数量限制
+        if self.instance_count >= self._max_instances:
+            # 尝试清理空闲实例
+            cleaned = await self.cleanup_idle()
+            if self.instance_count >= self._max_instances:
+                lock.release()
+                raise RuntimeError(
+                    f"Agent 实例数已达到上限 ({self._max_instances})，"
+                    f"无法创建新实例"
+                )
+
+        # 创建新实例
+        logger.info(f"创建新 Agent 实例: {agent_id}")
+        agent = await self._create_agent_instance(agent_id)
+
+        # 包装并存储
+        inst = AgentInstance(agent_id, agent)
+        inst.mark_active()
+        inst.request_count = 1
+        self._instances[agent_id] = inst
+
+        return agent
+
+    # 保持向后兼容的 get_agent
+    async def get_agent(self, agent_id: str) -> Any:
+        """获取 Agent 实例（向后兼容，内部自动释放锁）。"""
+        return await self.acquire_agent(agent_id)
 
     async def release_agent(self, agent_id: str) -> None:
         """
-        释放 Agent（标记为空闲）。
+        释放 Agent（标记为空闲并释放锁）。
 
         Args:
             agent_id: Agent ID
@@ -340,6 +354,12 @@ class AgentPool:
 
         inst.mark_idle()
         logger.debug(f"Agent {agent_id} 已标记为空闲")
+
+        # 释放锁
+        lock = self._locks.get(agent_id)
+        if lock and lock.locked():
+            lock.release()
+            logger.debug(f"Agent {agent_id} 锁已释放")
 
     async def hibernate_agent(self, agent_id: str) -> None:
         """
@@ -377,6 +397,12 @@ class AgentPool:
         # 从实例字典中移除
         del self._instances[agent_id]
         logger.info(f"Agent {agent_id} 已销毁")
+
+        # 释放锁（如果锁还被持有）
+        lock = self._locks.get(agent_id)
+        if lock and lock.locked():
+            lock.release()
+            logger.debug(f"Agent {agent_id} 锁已释放")
 
     # ==================== 清理任务 ====================
 
