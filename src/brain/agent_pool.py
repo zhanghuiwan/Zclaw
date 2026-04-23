@@ -243,6 +243,12 @@ class AgentPool:
         # 注册额外工具
         await self._register_extra_tools(agent, agent_id)
 
+        # P9: 初始化 MCP 连接
+        if settings.mcp.enabled:
+            mcp_count = await agent.init_mcp()
+            if mcp_count > 0:
+                logger.info(f"已初始化 {mcp_count} 个 MCP 工具到 Agent {agent_id}")
+
         # 设置系统提示词（使用 Soul）
         soul = self.get_soul(agent_id)
         if soul:
