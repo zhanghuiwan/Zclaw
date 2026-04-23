@@ -53,9 +53,13 @@ class AgentStateMachine:
 
     def transition(self, new_state: AgentState) -> None:
         if new_state not in _VALID_TRANSITIONS.get(self._state, set()):
+            import logging
+            logging.getLogger(__name__).error(f"非法状态转换: {self._state.value} -> {new_state.value}")
             raise StateTransitionError(self._state, new_state)
         old = self._state
         self._state = new_state
+        import logging
+        logging.getLogger(__name__).debug(f"状态转换: {old.value} -> {new_state.value}")
         for listener in self._listeners:
             listener(old, new_state)
 

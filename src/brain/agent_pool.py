@@ -303,15 +303,39 @@ class AgentPool:
         if agent_id in self._instances:
             inst = self._instances[agent_id]
 
+            # 如果实例忙碌，等待它变成空闲
+            wait_count = 0
+            while inst.state == AgentInstanceState.ACTIVE:
+                lock.release()
+                await asyncio.sleep(0.5)
+                wait_count += 1
+                if wait_count > 120:
+                    lock.release()
+                    raise RuntimeError(f"Agent {agent_id} 忙碌超时，请稍后再试")
+                await lock.acquire()
+                inst = self._instances.get(agent_id)
+                if not inst:
+                    break
+
             # 如果是休眠状态，需要唤醒（目前是重建）
-            if inst.state == AgentInstanceState.DORMANT:
+            if inst and inst.state == AgentInstanceState.DORMANT:
                 logger.info(f"Agent {agent_id} 从休眠状态唤醒")
                 inst.agent = await self._create_agent_instance(agent_id)
 
-            # 标记为活跃
-            inst.mark_active()
-            inst.request_count += 1
-            return inst.agent
+            if inst:
+                # 重置 AgentLoop 状态为 IDLE
+                # 如果状态不是 IDLE，说明上次可能没有正常结束，需要重置
+                from src.core.state import AgentState
+                current_state = inst.agent.loop.state
+                if current_state != AgentState.IDLE:
+                    logger.warning(f"AgentLoop 状态异常 ({current_state.value})，强制重置为 IDLE")
+                    inst.agent.loop.clear_history()
+                    inst.agent.loop._state._state = AgentState.IDLE
+
+                # 标记为活跃
+                inst.mark_active()
+                inst.request_count += 1
+                return inst.agent
 
         # 检查实例数量限制
         if self.instance_count >= self._max_instances:

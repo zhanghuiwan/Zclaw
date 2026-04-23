@@ -131,11 +131,11 @@ async def websocket_gateway(websocket: WebSocket):
 
                 agent_id = data.get("agent_id", gateway._default_agent_id)
 
-                # 取消之前的任务
+                # 等待之前的任务完成（带超时）
                 if current_task and not current_task.done():
                     cancel_event.set() if cancel_event else None
                     try:
-                        await asyncio.wait_for(current_task, timeout=2.0)
+                        await asyncio.wait_for(current_task, timeout=60.0)
                     except (asyncio.TimeoutError, asyncio.CancelledError):
                         pass
 

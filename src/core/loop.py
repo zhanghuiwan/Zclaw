@@ -341,6 +341,17 @@ class AgentLoop:
             raise
 
     async def run_stream(self, user_input: str) -> AsyncIterator[StreamEvent]:
+        # 如果当前状态不是 IDLE（可能从上次遗留），先重置为 IDLE
+        if self._state != AgentState.IDLE:
+            try:
+                if self._state in (AgentState.DONE, AgentState.ERROR):
+                    self._state = AgentState.IDLE
+                elif self._state == AgentState.EXECUTING:
+                    # 如果状态仍是 EXECUTING，说明上次可能没有正常结束
+                    # 不重置，让状态机处理
+                    pass
+            except Exception:
+                pass
         self._state.transition(AgentState.EXECUTING)
         self._round += 1
         self._current_user_input = user_input
