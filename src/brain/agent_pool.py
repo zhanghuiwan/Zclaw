@@ -229,85 +229,13 @@ class AgentPool:
         此方法在锁内执行，确保并发安全。
         """
         from src.core.agent import Agent
-        from src.config.settings import (
-            Settings,
-            LLMConfig,
-            AgentConfig,
-            MemoryConfig,
-            ContextConfig,
-            MCPConfig,
-            WebConfig,
-            SecurityConfig,
-            SkillsConfig,
-            ProviderConfig,
-        )
+        from src.config.settings import load_settings
 
-        # 构建 Settings
-        providers = {
-            "default": ProviderConfig(
-                base_url="https://api.minimaxi.com/v1",
-                api_key="",
-                model="MiniMax-M2.7",
-                max_context_tokens=32768,
-                supports_tools=True,
-                supports_streaming=True,
-            )
-        }
+        # 从 .env 文件加载配置
+        settings = load_settings(use_env=True)
 
-        llm_config = LLMConfig(
-            default_provider="default",
-            providers=providers,
-            temperature=0.3,
-            max_tokens=8192,
-        )
-
-        agent_config = AgentConfig(
-            max_loop_rounds=50,
-            planning_mode="auto",
-        )
-
-        memory_config = MemoryConfig(
-            storage_path=f".Zclaw/agents/{agent_id}/memory",
-            working_memory_max_tokens=30000,
-            episodic_max_age_days=90,
-        )
-
-        context_config = ContextConfig(
-            safety_margin_ratio=0.1,
-        )
-
-        mcp_config = MCPConfig(
-            enabled=True,
-            auto_connect=False,
-        )
-
-        web_config = WebConfig(
-            enabled=True,
-            host="0.0.0.0",
-            port=8080,
-        )
-
-        security_config = SecurityConfig(
-            auto_approve=["file_read", "directory", "file_search", "grep", "glob"],
-            audit_log=True,
-        )
-
-        skills_config = SkillsConfig(
-            enabled=True,
-            auto_load=True,
-            inject_to_prompt=True,
-        )
-
-        settings = Settings(
-            llm=llm_config,
-            agent=agent_config,
-            memory=memory_config,
-            context=context_config,
-            mcp=mcp_config,
-            web=web_config,
-            security=security_config,
-            skills=skills_config,
-        )
+        # 更新 memory 路径
+        settings.memory.storage_path = f".Zclaw/agents/{agent_id}/memory"
 
         # 创建 Agent
         agent = Agent(settings=settings, session_id=agent_id)
