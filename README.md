@@ -116,17 +116,21 @@ Zclaw/
 │   │   ├── models.py              # 数据模型
 │   │   ├── registry.py            # Skill 注册表
 │   │   └── tool.py                # Skill 工具包装
-│   ├── web/                         # Web UI
-│   │   ├── server.py                # FastAPI 应用
-│   │   ├── routes.py               # API 路由
-│   │   ├── schemas.py              # 数据模型
-│   │   ├── ws_manager.py           # WebSocket 管理
-│   │   └── static/                  # 前端静态文件
-│   └── cli/                         # CLI 界面
-│       ├── app.py                   # REPL 入口
-│       ├── renderer.py              # Rich 渲染
-│       ├── session.py              # 会话管理
-│       └── cost_tracker.py         # 费用追踪
+│   ├── channel/                    # Channel 层
+│   │   ├── gateway.py              # Gateway 核心
+│   │   ├── gateway_manager.py      # Gateway 进程管理
+│   │   ├── gateway_client.py       # Gateway WebSocket 客户端
+│   │   ├── normalizer.py           # 消息归一化
+│   │   ├── router.py               # 消息路由
+│   │   └── channels/               # 通道实现
+│   │       └── stdio.py           # STDIO 通道
+│   ├── cli/                         # CLI 界面
+│   │   ├── commands.py             # CLI 命令入口
+│   │   ├── renderer.py            # Rich 渲染
+│   │   ├── session.py             # 会话管理
+│   │   └── cost_tracker.py        # 费用追踪
+│   └── web/                        # Web UI
+│       ├── gateway_server.py       # Gateway 服务端
 └── tests/                           # 验证测试
 ```
 
@@ -150,24 +154,63 @@ cp .env.example .env
 编辑 `.env` 文件：
 
 ```env
-ZCLAW_PROVIDER=bailian          # 或 ollama, openai 等
-ZCLAW_MODEL=qwen-plus           # 或其他模型
-ZCLAW_API_KEY=sk-xxxxxxx        # 你的 API Key
-ZCLAW_BASE_URL=https://dashscope.aliyuncs.com/compatible-mode/v1
+ZCLAW_PROVIDER=minmax
+ZCLAW_MODEL=MiniMax-M2.7
+ZCLAW_API_KEY=your_api_key
+ZCLAW_BASE_URL=https://api.minimaxi.com/v1
 ```
 
-### 3. 运行
+### 3. 启动 Gateway
 
 ```bash
-# 交互模式
-python main.py
+# 启动 Gateway（后台守护进程）
+python main.py start
+# 或
+zclaw start
 
-# 非交互模式（单次提问）
-python main.py -p "列出当前目录的文件"
-
-# 启动 Web UI
-python -m src.web.server
+# 查看状态
+python main.py status
 ```
+
+### 4. 连接对话
+
+```bash
+# 连接 Gateway REPL 对话
+python main.py
+# 或
+zclaw
+
+# 停止 Gateway
+python main.py stop
+```
+
+### Gateway 架构
+
+```
+┌─────────────────────────────────────────┐
+│           Gateway (守护进程)            │
+│         ws://127.0.0.1:8080             │
+│         PID: ~/.Zclaw/gateway.pid       │
+└─────────────────────────────────────────┘
+                     │
+     ┌───────────────┼───────────────┐
+     │               │               │
+     ▼               ▼               ▼
+┌─────────┐    ┌─────────┐    ┌─────────┐
+│zclaw    │    │WebSocket│    │   IM    │
+│(CLI)    │    │(Web)    │    │(Future) │
+└─────────┘    └─────────┘    └─────────┘
+```
+
+Gateway 是独立进程，支持多个客户端同时连接。
+
+### 环境变量配置
+
+| 变量 | 说明 | 默认值 |
+|------|------|--------|
+| `GATEWAY_HOST` | Gateway 监听地址 | `127.0.0.1` |
+| `GATEWAY_PORT` | Gateway 监听端口 | `8080` |
+| `GATEWAY_PID_DIR` | PID 文件目录 | `~/.Zclaw` |
 
 ## 🛠️ 工具清单
 
