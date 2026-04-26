@@ -9,6 +9,8 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import os
+import signal
 import uuid
 from pathlib import Path
 from typing import Any
@@ -496,9 +498,61 @@ async def start_gateway_stdio(
 
 if __name__ == "__main__":
     import sys
-    if len(sys.argv) > 1:
-        agents_dir = sys.argv[1]
-    else:
-        agents_dir = "agents"
+    import argparse
+    import signal
 
-    asyncio.run(start_gateway_server(agents_dir))
+    parser = argparse.ArgumentParser(description="Zclaw Gateway Server")
+    parser.add_argument("--host", type=str, default="127.0.0.1", help="监听地址")
+    parser.add_argument("--port", type=int, default=8080, help="监听端口")
+    parser.add_argument("--agents-dir", type=str, default="agents", help="Agent 配置目录")
+    parser.add_argument("--storage-path", type=str, default=".Zclaw", help="存储路径")
+    parser.add_argument("--no-pid", action="store_true", help="不写入 PID 文件")
+
+    args = parser.parse_args()
+
+    # 写入 PID 文件
+    pid_dir = Path.home() / ".Zclaw"
+    pid_file = pid_dir / "gateway.pid"
+
+    if not args.no_pid:
+        pid_dir.mkdir(parents=True, exist_ok=True)
+        pid_file.write_text(str(os.getpid()))
+        print(f"PID file: {pid_file}")
+
+    # 优雅关闭处理
+    shutdown_event = asyncio.Event()
+
+    def signal_handler(sig, frame):
+        print(f"\n收到信号 {sig}, 准备关闭...")
+        shutdown_event.set()
+
+    signal.signal(signal.SIGTERM, signal_handler)
+    signal.signal(signal.SIGINT, signal_handler)
+
+    async def run_server():
+        await start_gateway_server(
+            agents_dir=args.agents_dir,
+            storage_path=args.storage_path,
+            host=args.host,
+            port=args.port,
+        )
+
+    async def run_with_shutdown():
+        server_task = asyncio.create_task(run_server())
+
+        # 等待关闭信号
+        await shutdown_event.wait()
+
+        # 清理 PID 文件
+        if pid_file.exists():
+            pid_file.unlink()
+
+        print("Gateway 已关闭")
+
+    try:
+        asyncio.run(run_with_shutdown())
+    except KeyboardInterrupt:
+        pass
+    finally:
+        if pid_file.exists():
+            pid_file.unlink()

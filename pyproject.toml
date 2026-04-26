@@ -20,7 +20,8 @@ dependencies = [
 ]
 
 [project.scripts]
-Zclaw = "src.cli.app:main"
+zclaw = "src.cli.commands:main"
+zclaw-client = "src.channel.gateway_client:main"
 
 [build-system]
 requires = ["hatchling"]

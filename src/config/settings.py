@@ -104,6 +104,14 @@ class SkillsConfig(BaseModel):
     inject_to_prompt: bool = True
 
 
+class GatewayConfig(BaseModel):
+    """Gateway 配置"""
+    host: str = "127.0.0.1"
+    port: int = 8080
+    pid_dir: str = "~/.Zclaw"
+    startup_timeout: int = 10
+
+
 class Settings(BaseModel):
     """应用全局配置"""
     llm: LLMConfig = Field(default_factory=LLMConfig)
@@ -114,6 +122,7 @@ class Settings(BaseModel):
     web: WebConfig = Field(default_factory=WebConfig)
     security: SecurityConfig = Field(default_factory=SecurityConfig)
     skills: SkillsConfig = Field(default_factory=SkillsConfig)
+    gateway: GatewayConfig = Field(default_factory=GatewayConfig)
 
 
 _ENV_VAR_PATTERN = re.compile(r"\$\{([^}]+)\}")
@@ -245,6 +254,12 @@ def load_settings_from_env(
     max_tokens = int(os.environ.get("ZCLAW_MAX_TOKENS", "8192"))
     max_rounds = int(os.environ.get("ZCLAW_MAX_LOOP_ROUNDS", "50"))
 
+    # Gateway 配置
+    gateway_host = os.environ.get("GATEWAY_HOST", "127.0.0.1")
+    gateway_port = int(os.environ.get("GATEWAY_PORT", "8080"))
+    gateway_pid_dir = os.environ.get("GATEWAY_PID_DIR", "~/.Zclaw")
+    gateway_timeout = int(os.environ.get("GATEWAY_STARTUP_TIMEOUT", "10"))
+
     # Step 3: 构建配置字典
     config_data: dict[str, Any] = {
         "llm": {
@@ -271,6 +286,12 @@ def load_settings_from_env(
         },
         "security": {
             "audit_log_path": ".Zclaw/audit",
+        },
+        "gateway": {
+            "host": gateway_host,
+            "port": gateway_port,
+            "pid_dir": gateway_pid_dir,
+            "startup_timeout": gateway_timeout,
         },
     }
 
