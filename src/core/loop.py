@@ -368,6 +368,7 @@ class AgentLoop:
                 content_buffer = ""
                 tool_calls_buffer: dict[int, dict] = {}
                 current_usage = Usage()
+                pending_llm_done = False  # 标记 LLM stream DONE 是否应延迟发送
                 # P5: 自动压缩上下文
                 if self._context:
                     self._messages = self._context.prepare_messages(self._messages)
@@ -375,6 +376,10 @@ class AgentLoop:
                     messages=self._messages,
                     tools=self._get_tool_definitions() if self._tools else None,
                 ):
+                    # 如果有 pending tools，暂时不发送 LLM 的 DONE
+                    if event.type == StreamEventType.DONE:
+                        pending_llm_done = True
+                        continue
                     yield event
                     if event.type == StreamEventType.CONTENT_DELTA:
                         content_buffer += event.data
@@ -410,8 +415,13 @@ class AgentLoop:
                     tool_calls=tool_calls_list if tool_calls_list else None,
                 )
                 self._messages.append(assistant_msg)
-                if not tool_calls_list:
-                    yield StreamEvent(type=StreamEventType.DONE, data=None)
+
+                # 如果有工具调用，先处理工具，最后再发 DONE
+                has_pending_tools = bool(tool_calls_list)
+                if not has_pending_tools:
+                    # 没有工具，发送 LLM 的 DONE 后结束
+                    if pending_llm_done:
+                        yield StreamEvent(type=StreamEventType.DONE, data=None)
                     self._state.transition(AgentState.DONE)
                     return
                 logger.info(

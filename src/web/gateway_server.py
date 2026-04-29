@@ -228,6 +228,12 @@ async def _handle_gateway_chat(
                     },
                 })
 
+            elif event.type == StreamEventType.LOOP_START:
+                await _ws_manager.send_json(conn_id, {
+                    "type": "loop_start",
+                    "data": {"round": event.data.get("round", 1)},
+                })
+
             elif event.type == StreamEventType.USAGE:
                 await _ws_manager.send_json(conn_id, {
                     "type": "usage",
