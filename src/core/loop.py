@@ -6,6 +6,7 @@ P2: 集成权限系统，支持 confirm/dangerous 工具调用的用户确认。
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 from typing import Any, AsyncIterator
@@ -25,7 +26,7 @@ from src.llm.models import (
     Usage,
 )
 from src.llm.router import LLMRouter
-from src.security.permission import PermissionManager, PermissionRequest
+from src.security.permission import PermissionManager, PermissionRequest, PermissionDecision
 from src.security.audit import AuditLogger
 from src.tools.base import ToolResult
 from src.tools.cache import ToolResultCache
@@ -143,7 +144,15 @@ class AgentLoop:
 
     async def _check_permission(
         self, tool_name: str, arguments: dict[str, Any]
-    ) -> tuple[bool, str]:
+    ) -> tuple[bool | None, str]:
+        """
+        检查权限。
+
+        Returns:
+            (True, reason): 允许执行
+            (False, reason): 拒绝执行
+            (None, reason): 需要外部确认（confirm/dangerous 级别）
+        """
         if not self._permissions:
             return True, "未配置权限管理器"
         danger_level = "safe"
@@ -155,7 +164,25 @@ class AgentLoop:
             danger_level=danger_level,
         )
         response = await self._permissions.check(request)
-        return response.allowed, response.reason
+
+        # ALLOW → 可以执行
+        if response.decision == PermissionDecision.ALLOW:
+            return True, response.reason
+
+        # DENY → 拒绝执行
+        if response.decision == PermissionDecision.DENY:
+            return False, response.reason
+
+        # CONFIRM → 需要外部确认，返回 None 表示需要等待
+        return None, response.reason
+
+    def resolve_permission(self, tool_call_id: str, allowed: bool) -> None:
+        """解决权限等待（由外部调用，如 gateway_server）。"""
+        if not hasattr(self, '_permission_results'):
+            self._permission_results = {}
+        self._permission_results[tool_call_id] = allowed
+        if hasattr(self, '_permission_events') and tool_call_id in self._permission_events:
+            self._permission_events[tool_call_id].set()
 
     async def _execute_single_tool(self, tc: ToolCall) -> ToolCallResult:
         """执行单个工具调用（含权限检查、缓存、审计）。"""
@@ -170,10 +197,20 @@ class AgentLoop:
 
         import time
         start_ms = time.monotonic()
-        allowed, reason = await self._check_permission(tc.name, args)
+        permission_result, reason = await self._check_permission(tc.name, args)
         duration_ms = int((time.monotonic() - start_ms) * 1000)
 
-        if not allowed:
+        # None 表示需要外部确认（confirm/dangerous 级别）
+        # 此时权限检查被推迟到 _execute_tool_calls 中处理，这里直接拒绝
+        if permission_result is None:
+            logger.info(f"Tool call '{tc.name}' requires external confirmation: {reason}")
+            return ToolCallResult(
+                tool_call_id=tc.id, name=tc.name,
+                success=False, content=f"权限需要确认: {reason}",
+                error=f"权限需要确认: {reason}",
+            )
+
+        if not permission_result:
             logger.info(f"Tool call '{tc.name}' denied: {reason}")
             return ToolCallResult(
                 tool_call_id=tc.id, name=tc.name,
@@ -221,18 +258,23 @@ class AgentLoop:
 
     async def _execute_tool_calls(
         self, tool_calls: list[ToolCall]
-    ) -> list[ToolCallResult]:
-        """执行一组工具调用（P3: safe 工具并行执行）。"""
+    ) -> AsyncIterator[StreamEvent | list[ToolCallResult]]:
+        """执行一组工具调用。
+
+        对于需要确认的工具会 yield PERMISSION_REQUEST 事件，
+        最后 yield 执行结果列表。
+        """
         if not self._tools:
             raise RuntimeError("未配置工具注册表")
 
         if len(tool_calls) <= 1:
             results = [await self._execute_single_tool(tool_calls[0])] if tool_calls else []
-            return results
+            yield results
+            return
 
-        # P3: 分离 safe 和非 safe 工具
+        # 分离 safe 和需要确认的工具
         safe_calls = []
-        sequential_calls = []
+        confirm_calls = []
         for tc in tool_calls:
             is_safe = False
             if self._tools and self._tools.has(tc.name):
@@ -240,13 +282,12 @@ class AgentLoop:
             if is_safe:
                 safe_calls.append(tc)
             else:
-                sequential_calls.append(tc)
+                confirm_calls.append(tc)
 
         results_map: dict[str, ToolCallResult] = {}
 
         # 并行执行 safe 工具
         if safe_calls:
-            import asyncio
             tasks = [self._execute_single_tool(tc) for tc in safe_calls]
             safe_results = await asyncio.gather(*tasks, return_exceptions=True)
             for tc, result in zip(safe_calls, safe_results):
@@ -258,12 +299,58 @@ class AgentLoop:
                 else:
                     results_map[tc.id] = result
 
-        # 串行执行非 safe 工具
-        for tc in sequential_calls:
+        # 对于需要确认的工具，先发送权限请求并等待
+        for tc in confirm_calls:
+            needs_confirm = False
+            if self._tools and self._tools.has(tc.name):
+                danger_level = self._tools.get(tc.name).danger_level.value
+                needs_confirm = danger_level in ("confirm", "dangerous")
+
+            if needs_confirm:
+                try:
+                    args = json.loads(tc.arguments) if isinstance(tc.arguments, str) else tc.arguments
+                except json.JSONDecodeError:
+                    args = {}
+
+                # 发送权限请求事件
+                yield StreamEvent(
+                    type=StreamEventType.PERMISSION_REQUEST,
+                    data={
+                        "tool_call_id": tc.id,
+                        "tool_name": tc.name,
+                        "arguments": args,
+                        "danger_level": self._tools.get(tc.name).danger_level.value,
+                    },
+                )
+
+                # 初始化权限等待结构
+                if not hasattr(self, '_permission_events'):
+                    self._permission_events = {}
+                    self._permission_results = {}
+                event = asyncio.Event()
+                self._permission_events[tc.id] = event
+
+                # 让出控制权，允许外部处理消息
+                # 等待直到事件被设置（外部调用 resolve_permission 时）
+                # 使用 polling loop 而非 await event.wait()，以避免阻塞事件循环
+                while not event.is_set():
+                    await asyncio.sleep(0.1)
+
+                allowed = self._permission_results.get(tc.id, False)
+                del self._permission_events[tc.id]
+                del self._permission_results[tc.id]
+
+                if not allowed:
+                    results_map[tc.id] = ToolCallResult(
+                        tool_call_id=tc.id, name=tc.name,
+                        success=False, content="权限被拒绝", error="权限被拒绝",
+                    )
+                    continue
+
             results_map[tc.id] = await self._execute_single_tool(tc)
 
-        # 按原始顺序排列结果
-        return [results_map[tc.id] for tc in tool_calls if tc.id in results_map]
+        # 返回结果
+        yield [results_map[tc.id] for tc in tool_calls if tc.id in results_map]
 
     def _log_audit(
         self,
@@ -433,7 +520,16 @@ class AgentLoop:
                         type=StreamEventType.TOOL_EXECUTE_START,
                         data={"id": tc.id, "name": tc.name},
                     )
-                results = await self._execute_tool_calls(tool_calls_list)
+                # 执行工具调用（可能是 async generator，需要迭代处理权限请求）
+                tool_gen = self._execute_tool_calls(tool_calls_list)
+                results = None
+                async for event in tool_gen:
+                    if isinstance(event, StreamEvent):
+                        # 权限请求事件，直接 yield 给外部
+                        yield event
+                    else:
+                        # 结果列表
+                        results = event
                 self._inject_tool_results(results)
                 for r in results:
                     yield StreamEvent(

@@ -71,6 +71,8 @@ class StreamEventType(str, Enum):
     TOOL_EXECUTE_END = "tool_execute_end"
     # Loop 控制
     LOOP_START = "loop_start"
+    # 权限请求事件
+    PERMISSION_REQUEST = "permission_request"
 
 
 # ──────────────────────────────────────────────

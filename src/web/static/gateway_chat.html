@@ -242,6 +242,93 @@
             color: #666;
             margin-top: 8px;
         }
+
+        .permission-dialog {
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: rgba(0, 0, 0, 0.7);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            z-index: 1000;
+        }
+
+        .permission-dialog.hidden {
+            display: none;
+        }
+
+        .permission-content {
+            background: #16213e;
+            border: 2px solid #ffaa00;
+            border-radius: 12px;
+            padding: 24px;
+            max-width: 500px;
+            width: 90%;
+        }
+
+        .permission-header {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            margin-bottom: 16px;
+            font-size: 18px;
+            font-weight: bold;
+            color: #ffaa00;
+        }
+
+        .permission-body {
+            margin-bottom: 20px;
+        }
+
+        .permission-tool {
+            font-size: 16px;
+            color: #00d9ff;
+            margin-bottom: 12px;
+        }
+
+        .permission-args {
+            background: #0a0a1a;
+            padding: 12px;
+            border-radius: 8px;
+            font-size: 13px;
+            color: #ccc;
+            max-height: 200px;
+            overflow-y: auto;
+            white-space: pre-wrap;
+            word-break: break-all;
+        }
+
+        .permission-actions {
+            display: flex;
+            gap: 12px;
+            justify-content: flex-end;
+        }
+
+        .perm-btn {
+            padding: 10px 24px;
+            border-radius: 8px;
+            font-size: 14px;
+            font-weight: 600;
+            cursor: pointer;
+            border: none;
+        }
+
+        .perm-btn.deny {
+            background: #ff4444;
+            color: white;
+        }
+
+        .perm-btn.allow {
+            background: #00ff88;
+            color: #1a1a2e;
+        }
+
+        .perm-btn:hover {
+            opacity: 0.9;
+        }
     </style>
 </head>
 <body>
@@ -266,6 +353,24 @@
         <button id="sendBtn" disabled>发送</button>
     </div>
 
+    <!-- Permission Dialog -->
+    <div class="permission-dialog hidden" id="permissionDialog">
+        <div class="permission-content">
+            <div class="permission-header">
+                <span id="permIcon">⚠️</span>
+                <span id="permTitle">权限请求</span>
+            </div>
+            <div class="permission-body">
+                <div class="permission-tool" id="permToolName">tool_name</div>
+                <pre class="permission-args" id="permArgs"></pre>
+            </div>
+            <div class="permission-actions">
+                <button class="perm-btn deny" id="permDeny">拒绝</button>
+                <button class="perm-btn allow" id="permAllow">允许</button>
+            </div>
+        </div>
+    </div>
+
     <script>
         const wsUrl = 'ws://127.0.0.1:8080/api/ws/gateway';
         const container = document.getElementById('chatContainer');
@@ -278,6 +383,7 @@
         let connected = false;
         let generating = false;
         let currentContent = '';
+        let pendingPermission = null;  // 待处理的权限请求
 
         function connect() {
             if (ws) ws.close();
@@ -401,8 +507,66 @@
                     sendBtn.textContent = '发送';
                     currentContent = '';
                     break;
+
+                case 'permission':
+                    // 显示权限确认对话框
+                    pendingPermission = {
+                        tool_call_id: data.tool_call_id,
+                        tool_name: data.tool_name,
+                        arguments: data.arguments,
+                        danger_level: data.danger_level,
+                    };
+                    showPermissionDialog(data);
+                    break;
             }
         }
+
+        function showPermissionDialog(data) {
+            const dialog = document.getElementById('permissionDialog');
+            const permIcon = document.getElementById('permIcon');
+            const permTitle = document.getElementById('permTitle');
+            const permToolName = document.getElementById('permToolName');
+            const permArgs = document.getElementById('permArgs');
+
+            if (data.danger_level === 'dangerous') {
+                permIcon.textContent = '🚨';
+                permTitle.textContent = '危险操作需要确认';
+                permTitle.style.color = '#ff4444';
+            } else {
+                permIcon.textContent = '⚠️';
+                permTitle.textContent = '操作需要确认';
+                permTitle.style.color = '#ffaa00';
+            }
+
+            permToolName.textContent = data.tool_name;
+            permArgs.textContent = JSON.stringify(data.arguments, null, 2);
+
+            dialog.classList.remove('hidden');
+        }
+
+        function hidePermissionDialog() {
+            const dialog = document.getElementById('permissionDialog');
+            dialog.classList.add('hidden');
+            pendingPermission = null;
+        }
+
+        function sendPermissionResponse(allowed) {
+            if (!pendingPermission || !ws) return;
+
+            ws.send(JSON.stringify({
+                type: 'permission_response',
+                data: {
+                    tool_call_id: pendingPermission.tool_call_id,
+                    allowed: allowed,
+                },
+            }));
+
+            hidePermissionDialog();
+        }
+
+        // 权限对话框按钮事件
+        document.getElementById('permAllow').addEventListener('click', () => sendPermissionResponse(true));
+        document.getElementById('permDeny').addEventListener('click', () => sendPermissionResponse(false));
 
         function addMessage(role, content) {
             const div = document.createElement('div');

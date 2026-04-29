@@ -156,6 +156,16 @@ async def websocket_gateway(websocket: WebSocket):
                         "data": {"message": "正在取消..."},
                     })
 
+            elif msg_type == "permission_response":
+                # 处理权限响应
+                tool_call_id = data.get("tool_call_id")
+                allowed = data.get("allowed", False)
+                # 存储权限结果并触发事件
+                if hasattr(_handle_gateway_chat, '_permission_results'):
+                    _handle_gateway_chat._permission_results[tool_call_id] = allowed
+                if hasattr(_handle_gateway_chat, '_permission_events') and tool_call_id in _handle_gateway_chat._permission_events:
+                    _handle_gateway_chat._permission_events[tool_call_id].set()
+
             elif msg_type == "command":
                 await _handle_gateway_command(conn_id, data)
 
@@ -233,6 +243,38 @@ async def _handle_gateway_chat(
                     "type": "loop_start",
                     "data": {"round": event.data.get("round", 1)},
                 })
+
+            elif event.type == StreamEventType.PERMISSION_REQUEST:
+                # 发送权限请求给客户端并等待响应
+                perm_data = event.data
+                await _ws_manager.send_json(conn_id, {
+                    "type": "permission",
+                    "data": {
+                        "tool_call_id": perm_data.get("tool_call_id"),
+                        "tool_name": perm_data.get("tool_name"),
+                        "arguments": perm_data.get("arguments"),
+                        "danger_level": perm_data.get("danger_level"),
+                    },
+                })
+
+                # 创建权限响应等待
+                if not hasattr(_handle_gateway_chat, '_permission_results'):
+                    _handle_gateway_chat._permission_results = {}
+                if not hasattr(_handle_gateway_chat, '_permission_events'):
+                    _handle_gateway_chat._permission_events = {}
+
+                tool_call_id = perm_data.get("tool_call_id")
+                event_ready = asyncio.Event()
+                _handle_gateway_chat._permission_events[tool_call_id] = event_ready
+
+                # 等待权限响应（由 websocket_gateway 中的消息处理设置）
+                # 使用 polling loop 以避免阻塞事件循环
+                while not event_ready.is_set():
+                    await asyncio.sleep(0.1)
+
+                # 获取响应结果并解决权限
+                allowed = _handle_gateway_chat._permission_results.pop(tool_call_id, False)
+                agent.loop.resolve_permission(tool_call_id, allowed)
 
             elif event.type == StreamEventType.USAGE:
                 await _ws_manager.send_json(conn_id, {
