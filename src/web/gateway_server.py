@@ -29,6 +29,9 @@ router = APIRouter(prefix="/api")
 _gateway: Gateway | None = None
 _ws_manager = ConnectionManager()
 
+# 权限响应存储（connection_id -> {tool_call_id: (allowed, event)}）
+_permission_responses: dict[str, dict[str, tuple[bool, asyncio.Event]]] = {}
+
 
 def set_gateway(gateway: Gateway) -> None:
     """设置 Gateway 实例引用。"""
@@ -160,11 +163,17 @@ async def websocket_gateway(websocket: WebSocket):
                 # 处理权限响应
                 tool_call_id = data.get("tool_call_id")
                 allowed = data.get("allowed", False)
-                # 存储权限结果并触发事件
-                if hasattr(_handle_gateway_chat, '_permission_results'):
-                    _handle_gateway_chat._permission_results[tool_call_id] = allowed
-                if hasattr(_handle_gateway_chat, '_permission_events') and tool_call_id in _handle_gateway_chat._permission_events:
-                    _handle_gateway_chat._permission_events[tool_call_id].set()
+                logger.info(f"收到权限响应: tool_call_id={tool_call_id}, allowed={allowed}")
+                # 更新权限响应，让 _handle_gateway_chat 中的等待能够获取
+                if conn_id in _permission_responses and tool_call_id in _permission_responses[conn_id]:
+                    # 更新 allowed 值并触发事件
+                    resp_data = _permission_responses[conn_id][tool_call_id]
+                    _permission_responses[conn_id][tool_call_id] = (allowed, resp_data[1])
+                    resp_data[1].set()
+                    logger.info(f"权限响应已处理并触发事件")
+                else:
+                    # 如果没有等待中的请求，直接忽略
+                    logger.warning(f"收到未预期的权限响应: {tool_call_id}")
 
             elif msg_type == "command":
                 await _handle_gateway_command(conn_id, data)
@@ -258,22 +267,26 @@ async def _handle_gateway_chat(
                 })
 
                 # 创建权限响应等待
-                if not hasattr(_handle_gateway_chat, '_permission_results'):
-                    _handle_gateway_chat._permission_results = {}
-                if not hasattr(_handle_gateway_chat, '_permission_events'):
-                    _handle_gateway_chat._permission_events = {}
-
                 tool_call_id = perm_data.get("tool_call_id")
                 event_ready = asyncio.Event()
-                _handle_gateway_chat._permission_events[tool_call_id] = event_ready
+                logger.info(f"等待权限响应: tool_call_id={tool_call_id}")
+
+                # 存储等待事件
+                if conn_id not in _permission_responses:
+                    _permission_responses[conn_id] = {}
+                _permission_responses[conn_id][tool_call_id] = (False, event_ready)
+                logger.info(f"权限请求已发送，等待响应: conn_id={conn_id}, tool_call_id={tool_call_id}")
 
                 # 等待权限响应（由 websocket_gateway 中的消息处理设置）
                 # 使用 polling loop 以避免阻塞事件循环
                 while not event_ready.is_set():
                     await asyncio.sleep(0.1)
 
-                # 获取响应结果并解决权限
-                allowed = _handle_gateway_chat._permission_results.pop(tool_call_id, False)
+                logger.info(f"权限响应到达，准备处理: tool_call_id={tool_call_id}")
+
+                # 获取响应结果
+                resp_data = _permission_responses[conn_id].pop(tool_call_id, (False, None))
+                allowed = resp_data[0]
                 agent.loop.resolve_permission(tool_call_id, allowed)
 
             elif event.type == StreamEventType.USAGE:
@@ -310,6 +323,8 @@ async def _handle_gateway_chat(
             "type": "done",
             "data": None,
         })
+        # 等待消息发送完成
+        await asyncio.sleep(0.1)
     finally:
         # 释放 Agent
         if agent is not None and gateway._agent_pool:

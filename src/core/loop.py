@@ -185,7 +185,11 @@ class AgentLoop:
             self._permission_events[tool_call_id].set()
 
     async def _execute_single_tool(self, tc: ToolCall) -> ToolCallResult:
-        """执行单个工具调用（含权限检查、缓存、审计）。"""
+        """执行单个工具调用。
+
+        注意：此方法不处理 confirm/dangerous 工具的权限检查，
+        权限检查由 _execute_tool_calls 统一处理。
+        """
         try:
             args = json.loads(tc.arguments) if isinstance(tc.arguments, str) else tc.arguments
         except json.JSONDecodeError as e:
@@ -197,20 +201,13 @@ class AgentLoop:
 
         import time
         start_ms = time.monotonic()
-        permission_result, reason = await self._check_permission(tc.name, args)
+
+        # 检查权限（只对 safe 工具）
+        # confirm/dangerous 工具由 _execute_tool_calls 处理权限确认
+        allowed, reason = await self._check_permission(tc.name, args)
         duration_ms = int((time.monotonic() - start_ms) * 1000)
 
-        # None 表示需要外部确认（confirm/dangerous 级别）
-        # 此时权限检查被推迟到 _execute_tool_calls 中处理，这里直接拒绝
-        if permission_result is None:
-            logger.info(f"Tool call '{tc.name}' requires external confirmation: {reason}")
-            return ToolCallResult(
-                tool_call_id=tc.id, name=tc.name,
-                success=False, content=f"权限需要确认: {reason}",
-                error=f"权限需要确认: {reason}",
-            )
-
-        if not permission_result:
+        if not allowed:
             logger.info(f"Tool call '{tc.name}' denied: {reason}")
             return ToolCallResult(
                 tool_call_id=tc.id, name=tc.name,
@@ -268,8 +265,61 @@ class AgentLoop:
             raise RuntimeError("未配置工具注册表")
 
         if len(tool_calls) <= 1:
-            results = [await self._execute_single_tool(tool_calls[0])] if tool_calls else []
-            yield results
+            tc = tool_calls[0] if tool_calls else None
+            if not tc:
+                yield []
+                return
+
+            # 检查是否需要确认
+            needs_confirm = False
+            if self._tools and self._tools.has(tc.name):
+                danger_level = self._tools.get(tc.name).danger_level.value
+                needs_confirm = danger_level in ("confirm", "dangerous")
+
+            # 需要确认的工具：yield 请求事件并等待响应
+            if needs_confirm:
+                try:
+                    args = json.loads(tc.arguments) if isinstance(tc.arguments, str) else tc.arguments
+                except json.JSONDecodeError:
+                    args = {}
+
+                yield StreamEvent(
+                    type=StreamEventType.PERMISSION_REQUEST,
+                    data={
+                        "tool_call_id": tc.id,
+                        "tool_name": tc.name,
+                        "arguments": args,
+                        "danger_level": self._tools.get(tc.name).danger_level.value,
+                    },
+                )
+
+                # 初始化权限等待结构
+                if not hasattr(self, '_permission_events'):
+                    self._permission_events = {}
+                    self._permission_results = {}
+                event = asyncio.Event()
+                self._permission_events[tc.id] = event
+
+                # 等待直到事件被设置
+                while not event.is_set():
+                    await asyncio.sleep(0.1)
+
+                allowed = self._permission_results.get(tc.id, False)
+                del self._permission_events[tc.id]
+                del self._permission_results[tc.id]
+
+                if not allowed:
+                    yield [
+                        ToolCallResult(
+                            tool_call_id=tc.id, name=tc.name,
+                            success=False, content="权限被拒绝", error="权限被拒绝",
+                        )
+                    ]
+                    return
+
+            # 执行工具（带权限检查，但上面已处理过确认的情况）
+            result = await self._execute_single_tool(tc)
+            yield [result]
             return
 
         # 分离 safe 和需要确认的工具
