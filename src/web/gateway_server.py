@@ -160,20 +160,13 @@ async def websocket_gateway(websocket: WebSocket):
                     })
 
             elif msg_type == "permission_response":
-                # 处理权限响应
                 tool_call_id = data.get("tool_call_id")
                 allowed = data.get("allowed", False)
-                logger.info(f"[DEBUG] 收到权限响应: conn_id={conn_id}, tool_call_id={tool_call_id}, allowed={allowed}")
-                # 更新权限响应，让 _handle_gateway_chat 中的等待能够获取
+                # 权限响应处理：更新等待状态并触发事件
                 if conn_id in _permission_responses and tool_call_id in _permission_responses[conn_id]:
-                    # 更新 allowed 值并触发事件
                     resp_data = _permission_responses[conn_id][tool_call_id]
                     _permission_responses[conn_id][tool_call_id] = (allowed, resp_data[1])
                     resp_data[1].set()
-                    logger.info(f"[DEBUG] 权限响应已处理并触发事件")
-                else:
-                    # 如果没有等待中的请求，直接忽略
-                    logger.warning(f"[DEBUG] 收到未预期的权限响应: conn_id={conn_id}, tool_call_id={tool_call_id}")
 
             elif msg_type == "command":
                 await _handle_gateway_command(conn_id, data)
