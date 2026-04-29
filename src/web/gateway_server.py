@@ -163,17 +163,17 @@ async def websocket_gateway(websocket: WebSocket):
                 # 处理权限响应
                 tool_call_id = data.get("tool_call_id")
                 allowed = data.get("allowed", False)
-                logger.info(f"收到权限响应: tool_call_id={tool_call_id}, allowed={allowed}")
+                logger.info(f"[DEBUG] 收到权限响应: conn_id={conn_id}, tool_call_id={tool_call_id}, allowed={allowed}")
                 # 更新权限响应，让 _handle_gateway_chat 中的等待能够获取
                 if conn_id in _permission_responses and tool_call_id in _permission_responses[conn_id]:
                     # 更新 allowed 值并触发事件
                     resp_data = _permission_responses[conn_id][tool_call_id]
                     _permission_responses[conn_id][tool_call_id] = (allowed, resp_data[1])
                     resp_data[1].set()
-                    logger.info(f"权限响应已处理并触发事件")
+                    logger.info(f"[DEBUG] 权限响应已处理并触发事件")
                 else:
                     # 如果没有等待中的请求，直接忽略
-                    logger.warning(f"收到未预期的权限响应: {tool_call_id}")
+                    logger.warning(f"[DEBUG] 收到未预期的权限响应: conn_id={conn_id}, tool_call_id={tool_call_id}")
 
             elif msg_type == "command":
                 await _handle_gateway_command(conn_id, data)
@@ -187,7 +187,7 @@ async def websocket_gateway(websocket: WebSocket):
     except WebSocketDisconnect:
         logger.info(f"Gateway WebSocket 客户端断开: {conn_id}")
     except Exception as e:
-        logger.error(f"Gateway WebSocket 错误 ({conn_id}): {e}")
+        logger.error(f"Gateway WebSocket 错误 ({conn_id}): {e}", exc_info=True)
     finally:
         _ws_manager.disconnect(conn_id)
         if current_task and not current_task.done():
@@ -269,20 +269,20 @@ async def _handle_gateway_chat(
                 # 创建权限响应等待
                 tool_call_id = perm_data.get("tool_call_id")
                 event_ready = asyncio.Event()
-                logger.info(f"等待权限响应: tool_call_id={tool_call_id}")
+                logger.info(f"[DEBUG] 等待权限响应: tool_call_id={tool_call_id}")
 
                 # 存储等待事件
                 if conn_id not in _permission_responses:
                     _permission_responses[conn_id] = {}
                 _permission_responses[conn_id][tool_call_id] = (False, event_ready)
-                logger.info(f"权限请求已发送，等待响应: conn_id={conn_id}, tool_call_id={tool_call_id}")
+                logger.info(f"[DEBUG] 权限请求已发送，等待响应: conn_id={conn_id}, tool_call_id={tool_call_id}")
 
                 # 等待权限响应（由 websocket_gateway 中的消息处理设置）
                 # 使用 polling loop 以避免阻塞事件循环
                 while not event_ready.is_set():
                     await asyncio.sleep(0.1)
 
-                logger.info(f"权限响应到达，准备处理: tool_call_id={tool_call_id}")
+                logger.info(f"[DEBUG] 权限响应到达，准备处理: tool_call_id={tool_call_id}")
 
                 # 获取响应结果
                 resp_data = _permission_responses[conn_id].pop(tool_call_id, (False, None))

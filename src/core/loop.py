@@ -184,11 +184,12 @@ class AgentLoop:
         if hasattr(self, '_permission_events') and tool_call_id in self._permission_events:
             self._permission_events[tool_call_id].set()
 
-    async def _execute_single_tool(self, tc: ToolCall) -> ToolCallResult:
+    async def _execute_single_tool(self, tc: ToolCall, skip_permission_check: bool = False) -> ToolCallResult:
         """执行单个工具调用。
 
-        注意：此方法不处理 confirm/dangerous 工具的权限检查，
-        权限检查由 _execute_tool_calls 统一处理。
+        Args:
+            tc: 工具调用
+            skip_permission_check: 是否跳过权限检查（用于已通过外部确认的工具）
         """
         try:
             args = json.loads(tc.arguments) if isinstance(tc.arguments, str) else tc.arguments
@@ -202,18 +203,21 @@ class AgentLoop:
         import time
         start_ms = time.monotonic()
 
-        # 检查权限（只对 safe 工具）
+        # 检查权限（只有 safe 工具才会通过这里）
         # confirm/dangerous 工具由 _execute_tool_calls 处理权限确认
-        allowed, reason = await self._check_permission(tc.name, args)
-        duration_ms = int((time.monotonic() - start_ms) * 1000)
+        if not skip_permission_check:
+            allowed, reason = await self._check_permission(tc.name, args)
+            duration_ms = int((time.monotonic() - start_ms) * 1000)
 
-        if not allowed:
-            logger.info(f"Tool call '{tc.name}' denied: {reason}")
-            return ToolCallResult(
-                tool_call_id=tc.id, name=tc.name,
-                success=False, content=f"权限被拒绝: {reason}",
-                error=f"权限被拒绝: {reason}",
-            )
+            if not allowed:
+                logger.info(f"Tool call '{tc.name}' denied: {reason}")
+                return ToolCallResult(
+                    tool_call_id=tc.id, name=tc.name,
+                    success=False, content=f"权限被拒绝: {reason}",
+                    error=f"权限被拒绝: {reason}",
+                )
+        else:
+            duration_ms = int((time.monotonic() - start_ms) * 1000)
 
         # P3: 缓存检查（只对 safe 工具）
         is_safe = False
@@ -317,8 +321,8 @@ class AgentLoop:
                     ]
                     return
 
-            # 执行工具（带权限检查，但上面已处理过确认的情况）
-            result = await self._execute_single_tool(tc)
+            # 执行工具（权限已确认）
+            result = await self._execute_single_tool(tc, skip_permission_check=True)
             yield [result]
             return
 
