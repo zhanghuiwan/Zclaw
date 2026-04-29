@@ -188,7 +188,25 @@ class PermissionManager:
                     auto=True,
                 )
 
-        # 4. 未知危险等级 → 自动允许
+        # 4. confirm 级别自动批准（Web UI 场景）
+        if request.danger_level == "confirm":
+            self._stats["auto_allowed"] += 1
+            return PermissionResponse(
+                decision=PermissionDecision.ALLOW,
+                reason="confirm 级别工具自动批准",
+                auto=True,
+            )
+
+        # 5. dangerous 级别自动拒绝（提示使用 CLI）
+        if request.danger_level == "dangerous":
+            self._stats["auto_denied"] += 1
+            return PermissionResponse(
+                decision=PermissionDecision.DENY,
+                reason="dangerous 级别工具需使用 CLI 授权",
+                auto=True,
+            )
+
+        # 6. 未知危险等级 → 自动允许
         if request.danger_level not in ("safe", "confirm", "dangerous"):
             self._stats["auto_allowed"] += 1
             return PermissionResponse(
@@ -197,12 +215,12 @@ class PermissionManager:
                 auto=True,
             )
 
-        # 5. confirm/dangerous 需要外部确认
-        # 返回 CONFIRM 而不是 DENY，让外部系统（如 Gateway）处理确认流程
+        # 理论上不会走到这里（safe/confirm/dangerous 已覆盖）
+        self._stats["auto_denied"] += 1
         return PermissionResponse(
-            decision=PermissionDecision.CONFIRM,
-            reason=f"工具 '{request.tool_name}' 需要确认（{request.danger_level}）",
-            auto=False,
+            decision=PermissionDecision.DENY,
+            reason=f"未知危险等级 '{request.danger_level}'",
+            auto=True,
         )
 
     def _is_blocked(self, request: PermissionRequest) -> bool:

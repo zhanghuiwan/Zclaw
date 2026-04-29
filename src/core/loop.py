@@ -184,13 +184,8 @@ class AgentLoop:
         if hasattr(self, '_permission_events') and tool_call_id in self._permission_events:
             self._permission_events[tool_call_id].set()
 
-    async def _execute_single_tool(self, tc: ToolCall, skip_permission_check: bool = False) -> ToolCallResult:
-        """执行单个工具调用。
-
-        Args:
-            tc: 工具调用
-            skip_permission_check: 是否跳过权限检查（用于已通过外部确认的工具）
-        """
+    async def _execute_single_tool(self, tc: ToolCall) -> ToolCallResult:
+        """执行单个工具调用。权限检查由 PermissionManager 处理。"""
         try:
             args = json.loads(tc.arguments) if isinstance(tc.arguments, str) else tc.arguments
         except json.JSONDecodeError as e:
@@ -203,21 +198,17 @@ class AgentLoop:
         import time
         start_ms = time.monotonic()
 
-        # 检查权限（只有 safe 工具才会通过这里）
-        # confirm/dangerous 工具由 _execute_tool_calls 处理权限确认
-        if not skip_permission_check:
-            allowed, reason = await self._check_permission(tc.name, args)
-            duration_ms = int((time.monotonic() - start_ms) * 1000)
+        # 权限检查（PermissionManager 处理 confirm/dangerous 自动批准/拒绝）
+        allowed, reason = await self._check_permission(tc.name, args)
+        duration_ms = int((time.monotonic() - start_ms) * 1000)
 
-            if not allowed:
-                logger.info(f"Tool call '{tc.name}' denied: {reason}")
-                return ToolCallResult(
-                    tool_call_id=tc.id, name=tc.name,
-                    success=False, content=f"权限被拒绝: {reason}",
-                    error=f"权限被拒绝: {reason}",
-                )
-        else:
-            duration_ms = int((time.monotonic() - start_ms) * 1000)
+        if not allowed:
+            logger.info(f"Tool call '{tc.name}' denied: {reason}")
+            return ToolCallResult(
+                tool_call_id=tc.id, name=tc.name,
+                success=False, content=f"权限被拒绝: {reason}",
+                error=f"权限被拒绝: {reason}",
+            )
 
         # P3: 缓存检查（只对 safe 工具）
         is_safe = False
@@ -274,55 +265,9 @@ class AgentLoop:
                 yield []
                 return
 
-            # 检查是否需要确认
-            needs_confirm = False
-            if self._tools and self._tools.has(tc.name):
-                danger_level = self._tools.get(tc.name).danger_level.value
-                needs_confirm = danger_level in ("confirm", "dangerous")
-
-            # 需要确认的工具：yield 请求事件并等待响应
-            if needs_confirm:
-                try:
-                    args = json.loads(tc.arguments) if isinstance(tc.arguments, str) else tc.arguments
-                except json.JSONDecodeError:
-                    args = {}
-
-                yield StreamEvent(
-                    type=StreamEventType.PERMISSION_REQUEST,
-                    data={
-                        "tool_call_id": tc.id,
-                        "tool_name": tc.name,
-                        "arguments": args,
-                        "danger_level": self._tools.get(tc.name).danger_level.value,
-                    },
-                )
-
-                # 初始化权限等待结构
-                if not hasattr(self, '_permission_events'):
-                    self._permission_events = {}
-                    self._permission_results = {}
-                event = asyncio.Event()
-                self._permission_events[tc.id] = event
-
-                # 等待直到事件被设置
-                while not event.is_set():
-                    await asyncio.sleep(0.1)
-
-                allowed = self._permission_results.get(tc.id, False)
-                del self._permission_events[tc.id]
-                del self._permission_results[tc.id]
-
-                if not allowed:
-                    yield [
-                        ToolCallResult(
-                            tool_call_id=tc.id, name=tc.name,
-                            success=False, content="权限被拒绝", error="权限被拒绝",
-                        )
-                    ]
-                    return
-
-            # 执行工具（权限已确认）
-            result = await self._execute_single_tool(tc, skip_permission_check=True)
+            # 直接执行工具，权限检查由 _execute_single_tool 处理
+            # confirm 级别自动批准，dangerous 级别自动拒绝
+            result = await self._execute_single_tool(tc)
             yield [result]
             return
 
@@ -353,55 +298,10 @@ class AgentLoop:
                 else:
                     results_map[tc.id] = result
 
-        # 对于需要确认的工具，先发送权限请求并等待
+        # 对于需要确认的工具，直接执行（PermissionManager 处理自动批准/拒绝）
         for tc in confirm_calls:
-            needs_confirm = False
-            if self._tools and self._tools.has(tc.name):
-                danger_level = self._tools.get(tc.name).danger_level.value
-                needs_confirm = danger_level in ("confirm", "dangerous")
-
-            if needs_confirm:
-                try:
-                    args = json.loads(tc.arguments) if isinstance(tc.arguments, str) else tc.arguments
-                except json.JSONDecodeError:
-                    args = {}
-
-                # 发送权限请求事件
-                yield StreamEvent(
-                    type=StreamEventType.PERMISSION_REQUEST,
-                    data={
-                        "tool_call_id": tc.id,
-                        "tool_name": tc.name,
-                        "arguments": args,
-                        "danger_level": self._tools.get(tc.name).danger_level.value,
-                    },
-                )
-
-                # 初始化权限等待结构
-                if not hasattr(self, '_permission_events'):
-                    self._permission_events = {}
-                    self._permission_results = {}
-                event = asyncio.Event()
-                self._permission_events[tc.id] = event
-
-                # 让出控制权，允许外部处理消息
-                # 等待直到事件被设置（外部调用 resolve_permission 时）
-                # 使用 polling loop 而非 await event.wait()，以避免阻塞事件循环
-                while not event.is_set():
-                    await asyncio.sleep(0.1)
-
-                allowed = self._permission_results.get(tc.id, False)
-                del self._permission_events[tc.id]
-                del self._permission_results[tc.id]
-
-                if not allowed:
-                    results_map[tc.id] = ToolCallResult(
-                        tool_call_id=tc.id, name=tc.name,
-                        success=False, content="权限被拒绝", error="权限被拒绝",
-                    )
-                    continue
-
-            results_map[tc.id] = await self._execute_single_tool(tc)
+            result = await self._execute_single_tool(tc)
+            results_map[tc.id] = result
 
         # 返回结果
         yield [results_map[tc.id] for tc in tool_calls if tc.id in results_map]
