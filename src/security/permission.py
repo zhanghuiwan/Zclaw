@@ -58,7 +58,7 @@ class PermissionResponse:
         return self.decision == PermissionDecision.ALLOW
 
 
-ConfirmCallback = Callable[[PermissionRequest], Awaitable[bool]]
+ConfirmCallback = Callable[[PermissionRequest], Awaitable[PermissionResponse]]
 
 
 class PermissionManager:
@@ -164,21 +164,13 @@ class PermissionManager:
 
         if self._confirm_callback is not None:
             try:
-                approved = await self._confirm_callback(request)
-                if approved:
+                response = await self._confirm_callback(request)
+                if response.allowed:
                     self._stats["user_confirmed"] += 1
-                    return PermissionResponse(
-                        decision=PermissionDecision.ALLOW,
-                        reason=f"用户已批准（{request.danger_level} 级别）",
-                        auto=False,
-                    )
+                    return response
                 else:
                     self._stats["user_denied"] += 1
-                    return PermissionResponse(
-                        decision=PermissionDecision.DENY,
-                        reason="用户已拒绝",
-                        auto=False,
-                    )
+                    return response
             except Exception as e:
                 logger.error(f"确认回调错误: {e}")
                 self._stats["auto_denied"] += 1
@@ -188,38 +180,11 @@ class PermissionManager:
                     auto=True,
                 )
 
-        # 4. confirm 级别自动批准（Web UI 场景）
-        if request.danger_level == "confirm":
-            self._stats["auto_allowed"] += 1
-            return PermissionResponse(
-                decision=PermissionDecision.ALLOW,
-                reason="confirm 级别工具自动批准",
-                auto=True,
-            )
-
-        # 5. dangerous 级别自动拒绝（提示使用 CLI）
-        if request.danger_level == "dangerous":
-            self._stats["auto_denied"] += 1
-            return PermissionResponse(
-                decision=PermissionDecision.DENY,
-                reason="dangerous 级别工具需使用 CLI 授权",
-                auto=True,
-            )
-
-        # 6. 未知危险等级 → 自动允许
-        if request.danger_level not in ("safe", "confirm", "dangerous"):
-            self._stats["auto_allowed"] += 1
-            return PermissionResponse(
-                decision=PermissionDecision.ALLOW,
-                reason=f"未知危险等级 '{request.danger_level}'，默认允许",
-                auto=True,
-            )
-
-        # 理论上不会走到这里（safe/confirm/dangerous 已覆盖）
+        # 无回调时默认拒绝（安全默认值）
         self._stats["auto_denied"] += 1
         return PermissionResponse(
             decision=PermissionDecision.DENY,
-            reason=f"未知危险等级 '{request.danger_level}'",
+            reason=f"无确认回调（danger_level={request.danger_level}）",
             auto=True,
         )
 

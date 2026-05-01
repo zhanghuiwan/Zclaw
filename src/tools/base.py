@@ -11,12 +11,7 @@ from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any
 
-
-class DangerLevel(str, Enum):
-    """工具危险等级"""
-    SAFE = "safe"
-    CONFIRM = "confirm"
-    DANGEROUS = "dangerous"
+from src.security.permission import DangerLevel
 
 
 @dataclass

@@ -24,7 +24,7 @@ from src.config.settings import load_settings, Settings
 from src.core.agent import Agent
 from src.core.state import AgentState
 from src.llm.models import StreamEventType
-from src.security.permission import PermissionRequest
+from src.security.permission import PermissionRequest, PermissionResponse, PermissionDecision
 
 logger = logging.getLogger(__name__)
 
@@ -56,6 +56,7 @@ class REPL:
         self._settings = settings
         self._renderer = renderer
 
+        self._agent.permission_manager.set_auto_confirm(True)
         self._agent.permission_manager.set_confirm_callback(self._on_permission_request)
 
         # 费用追踪
@@ -549,7 +550,7 @@ class REPL:
             self._renderer.print_warning(f"未知命令: {cmd}。输入 /help 查看可用命令。")
         return False
 
-    async def _on_permission_request(self, request: PermissionRequest) -> bool:
+    async def _on_permission_request(self, request: PermissionRequest) -> PermissionResponse:
         self._renderer.print_permission_request(
             tool_name=request.tool_name,
             danger_level=request.danger_level,
@@ -560,14 +561,27 @@ class REPL:
                 [("class:prompt", "  是否允许? [y/N] ")],
             )
         except (KeyboardInterrupt, EOFError):
-            return False
+            return PermissionResponse(
+                decision=PermissionDecision.DENY,
+                reason="用户中断",
+                auto=False,
+            )
         answer = (answer or "").strip().lower()
         approved = answer in ("y", "yes")
         if approved:
             self._renderer.print_permission_allowed(request.tool_name, auto=False)
+            return PermissionResponse(
+                decision=PermissionDecision.ALLOW,
+                reason="用户批准",
+                auto=False,
+            )
         else:
             self._renderer.print_permission_denied(request.tool_name, "用户拒绝")
-        return approved
+            return PermissionResponse(
+                decision=PermissionDecision.DENY,
+                reason="用户拒绝",
+                auto=False,
+            )
 
 
 def main():

@@ -208,7 +208,7 @@ class OpenAICompatProvider(BaseProvider):
                     if finish_reason == "tool_calls" and delta.tool_calls:
                         for tc_delta in delta.tool_calls:
                             args = tc_delta.function.arguments if tc_delta.function else ""
-                            args = strip_think_content(args)
+                            args = strip_think_content(args) or "{}"
                             yield StreamEvent(
                                 type=StreamEventType.TOOL_CALL_END,
                                 data={

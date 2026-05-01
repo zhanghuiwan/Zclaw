@@ -93,10 +93,10 @@ async def websocket_endpoint(websocket: WebSocket):
     # 设置权限回调
     async def web_permission_callback(request):
         """Web 模式的权限回调 - 通过 WebSocket 向用户请求确认。"""
-        from src.security.permission import DangerLevel
+        from src.security.permission import DangerLevel, PermissionResponse, PermissionDecision
 
-        if request.danger_level == DangerLevel.SAFE:
-            return True, "自动批准（安全操作）"
+        # SAFE 级别由 PermissionManager 自动处理（无需回调）
+        # 此处只处理 CONFIRM 和 DANGEROUS 级别
 
         request_id = uuid.uuid4().hex[:8]
 
@@ -106,11 +106,6 @@ async def websocket_endpoint(websocket: WebSocket):
         except Exception:
             args_for_client = str(request.arguments)
 
-        # 对于危险操作，默认拒绝
-        if request.danger_level == DangerLevel.DANGEROUS:
-            # 但仍询问用户
-            pass
-
         allowed = await ws_manager.request_permission(
             conn_id=conn_id,
             request_id=request_id,
@@ -118,10 +113,22 @@ async def websocket_endpoint(websocket: WebSocket):
             arguments=args_for_client,
             danger_level=request.danger_level.value,
         )
-        reason = "用户批准" if allowed else "用户拒绝"
-        return allowed, reason
+
+        if allowed:
+            return PermissionResponse(
+                decision=PermissionDecision.ALLOW,
+                reason="用户批准",
+                auto=False,
+            )
+        else:
+            return PermissionResponse(
+                decision=PermissionDecision.DENY,
+                reason="用户拒绝或超时",
+                auto=False,
+            )
 
     if _agent and _agent.permission_manager:
+        _agent.permission_manager.set_auto_confirm(False)
         _agent.permission_manager.set_confirm_callback(web_permission_callback)
 
     # 当前正在运行的生成任务
