@@ -111,7 +111,7 @@ async def websocket_endpoint(websocket: WebSocket):
             request_id=request_id,
             tool_name=request.tool_name,
             arguments=args_for_client,
-            danger_level=request.danger_level.value,
+            danger_level=request.danger_level,
         )
 
         if allowed:

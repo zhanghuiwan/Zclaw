@@ -159,6 +159,12 @@ async def websocket_gateway(websocket: WebSocket):
             elif msg_type == "command":
                 await _handle_gateway_command(conn_id, data)
 
+            elif msg_type == "permission":
+                # 处理权限响应
+                request_id = data.get("request_id", "")
+                allowed = data.get("allowed", False)
+                _ws_manager.resolve_permission(request_id, allowed)
+
             else:
                 await _ws_manager.send_json(conn_id, {
                     "type": "error",
@@ -188,12 +194,54 @@ async def _handle_gateway_chat(
     由于 Gateway.handle_message 返回文本响应，
     我们需要通过 Agent.chat_stream 来实现流式响应。
     """
+    import uuid
+
     gateway = get_gateway()
     agent = None
+
+    # 定义 Gateway WebSocket 的权限回调
+    async def gateway_ws_permission_callback(request):
+        """Gateway WebSocket 模式的权限回调"""
+        from src.security.permission import PermissionResponse, PermissionDecision
+
+        # SAFE 级别由 PermissionManager 自动处理
+        request_id = uuid.uuid4().hex[:8]
+
+        # 序列化 arguments
+        try:
+            args_for_client = dict(request.arguments)
+        except Exception:
+            args_for_client = str(request.arguments)
+
+        allowed = await _ws_manager.request_permission(
+            conn_id=conn_id,
+            request_id=request_id,
+            tool_name=request.tool_name,
+            arguments=args_for_client,
+            danger_level=request.danger_level,
+        )
+
+        if allowed:
+            return PermissionResponse(
+                decision=PermissionDecision.ALLOW,
+                reason="用户批准",
+                auto=False,
+            )
+        else:
+            return PermissionResponse(
+                decision=PermissionDecision.DENY,
+                reason="用户拒绝或超时",
+                auto=False,
+            )
 
     try:
         # 获取 Agent
         agent = await gateway._agent_pool.get_agent(agent_id)
+
+        # 设置权限回调（与 routes.py /api/ws 保持一致）
+        if agent.permission_manager:
+            agent.permission_manager.set_auto_confirm(False)
+            agent.permission_manager.set_confirm_callback(gateway_ws_permission_callback)
 
         # 使用 Agent 的流式接口
         async for event in agent.chat_stream(message):
