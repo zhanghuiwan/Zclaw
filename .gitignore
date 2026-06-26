@@ -45,6 +45,8 @@ htmlcov/
 
 # Logs
 *.log
+botpy.log
+botpy.log.*
 
 # OS
 .DS_Store

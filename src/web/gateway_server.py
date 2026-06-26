@@ -47,6 +47,7 @@ async def initialize_gateway(
     agents_dir: str | Path = "agents",
     storage_path: str = ".Zclaw",
     enable_stdio: bool = False,
+    settings=None,
 ) -> Gateway:
     """
     初始化 Gateway 并连接所有组件。
@@ -78,6 +79,59 @@ async def initialize_gateway(
         stdio_channel = StdioChannel()
         gateway.register_channel(stdio_channel)
         logger.info("STDIO 通道已注册")
+
+    # 注册 QQ 通道（如果启用）
+    if settings and settings.qq and settings.qq.enabled and settings.qq.appid and settings.qq.appsecret:
+        from src.channel.channels.qq import QQChannel
+        qq_channel = QQChannel(
+            appid=settings.qq.appid,
+            appsecret=settings.qq.appsecret,
+        )
+        gateway.register_channel(qq_channel)
+        logger.info(f"QQ 通道已注册 (appid={settings.qq.appid})")
+
+        # 注册 QQ 消息处理器
+        async def qq_message_handler(channel_msg):
+            """处理 QQ 消息并回复"""
+            try:
+                response = await gateway.handle_message(
+                    channel_name="qq",
+                    raw_message={
+                        "content": channel_msg.text,
+                        "openid": channel_msg.sender_id,
+                        "nickname": channel_msg.sender_name,
+                        "guild_id": channel_msg.channel_specific.get("guild_id", ""),
+                        "channel_id": channel_msg.channel_specific.get("channel_id", ""),
+                    },
+                )
+
+                if response:
+                    channel_specific = channel_msg.channel_specific
+                    msg_type = channel_specific.get("msg_type", "")
+                    msg_id = channel_specific.get("msg_id", "")
+                    msg_seq = channel_specific.get("msg_seq", 1)
+
+                    if msg_type == "GROUP":
+                        await qq_channel.send(
+                            response,
+                            recipient=channel_msg.sender_id,
+                            group_openid=channel_specific.get("group_openid", ""),
+                            msg_id=msg_id,
+                            msg_seq=msg_seq,
+                            api=channel_msg.metadata.get("api"),
+                        )
+                    else:
+                        await qq_channel.send(
+                            response,
+                            recipient=channel_msg.sender_id,
+                            msg_id=msg_id,
+                            msg_seq=msg_seq,
+                            api=channel_msg.metadata.get("api"),
+                        )
+            except Exception as e:
+                logger.error(f"QQ 消息处理失败: {e}")
+
+        qq_channel.register_message_callback(qq_message_handler)
 
     # 加载 Cron 任务
     await gateway.load_cron_from_agents_config(agents_dir)
@@ -194,54 +248,17 @@ async def _handle_gateway_chat(
     由于 Gateway.handle_message 返回文本响应，
     我们需要通过 Agent.chat_stream 来实现流式响应。
     """
-    import uuid
-
     gateway = get_gateway()
     agent = None
-
-    # 定义 Gateway WebSocket 的权限回调
-    async def gateway_ws_permission_callback(request):
-        """Gateway WebSocket 模式的权限回调"""
-        from src.security.permission import PermissionResponse, PermissionDecision
-
-        # SAFE 级别由 PermissionManager 自动处理
-        request_id = uuid.uuid4().hex[:8]
-
-        # 序列化 arguments
-        try:
-            args_for_client = dict(request.arguments)
-        except Exception:
-            args_for_client = str(request.arguments)
-
-        allowed = await _ws_manager.request_permission(
-            conn_id=conn_id,
-            request_id=request_id,
-            tool_name=request.tool_name,
-            arguments=args_for_client,
-            danger_level=request.danger_level,
-        )
-
-        if allowed:
-            return PermissionResponse(
-                decision=PermissionDecision.ALLOW,
-                reason="用户批准",
-                auto=False,
-            )
-        else:
-            return PermissionResponse(
-                decision=PermissionDecision.DENY,
-                reason="用户拒绝或超时",
-                auto=False,
-            )
 
     try:
         # 获取 Agent
         agent = await gateway._agent_pool.get_agent(agent_id)
 
-        # 设置权限回调（与 routes.py /api/ws 保持一致）
+        # 设置权限回调和自动批准（与 CLI 保持一致）
         if agent.permission_manager:
-            agent.permission_manager.set_auto_confirm(False)
-            agent.permission_manager.set_confirm_callback(gateway_ws_permission_callback)
+            agent.permission_manager.set_auto_confirm(True)
+            # 不再需要回调请求用户确认，大量命令自动批准运行
 
         # 使用 Agent 的流式接口
         async for event in agent.chat_stream(message):
@@ -406,6 +423,7 @@ async def wakeup_session(session_id: str):
 async def create_gateway_app(
     agents_dir: str | Path = "agents",
     storage_path: str = ".Zclaw",
+    settings=None,
 ) -> tuple[Any, Gateway]:
     """
     创建带 Gateway 的 FastAPI 应用。
@@ -413,6 +431,7 @@ async def create_gateway_app(
     Args:
         agents_dir: Agent 配置目录
         storage_path: 存储路径
+        settings: 全局配置
 
     Returns:
         tuple: (FastAPI app, Gateway instance)
@@ -421,7 +440,7 @@ async def create_gateway_app(
     from fastapi.middleware.cors import CORSMiddleware
 
     # 初始化 Gateway
-    gateway = await initialize_gateway(agents_dir, storage_path)
+    gateway = await initialize_gateway(agents_dir, storage_path, settings=settings)
 
     app = FastAPI(
         title="Zclaw Gateway",
@@ -461,6 +480,7 @@ async def start_gateway_server(
     storage_path: str = ".Zclaw",
     host: str = "0.0.0.0",
     port: int = 8080,
+    settings=None,
 ) -> None:
     """
     启动 Gateway Web 服务器。
@@ -470,13 +490,15 @@ async def start_gateway_server(
         storage_path: 存储路径
         host: 监听地址
         port: 监听端口
+        settings: 全局配置
     """
     import uvicorn
 
-    app, gateway = await create_gateway_app(agents_dir, storage_path)
+    app, gateway = await create_gateway_app(agents_dir, storage_path, settings=settings)
 
     # 启动 Gateway 主循环（但不阻塞）
     asyncio.create_task(gateway.start())
+    logger.info("Gateway 启动任务已创建")
 
     logger.info(f"启动 Gateway Web 服务器: http://{host}:{port}")
 

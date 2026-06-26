@@ -173,6 +173,11 @@ async def _run_gateway_mode(args) -> None:
     logging.getLogger("openai").setLevel(logging.WARNING)
     logging.getLogger("httpx").setLevel(logging.WARNING)
 
+    # 加载配置
+    from src.config.settings import load_settings
+    settings = load_settings(use_env=True)
+    logger.info(f"QQ 配置: enabled={settings.qq.enabled}, appid={settings.qq.appid[:6] if settings.qq.appid else 'N/A'}...")
+
     if args.stdio:
         # STDIO 模式
         print("=" * 60)
@@ -186,6 +191,7 @@ async def _run_gateway_mode(args) -> None:
         await start_gateway_stdio(
             agents_dir=args.agents_dir,
             storage_path=args.storage,
+            settings=settings,
         )
     else:
         # WebSocket/HTTP 模式
@@ -196,6 +202,10 @@ async def _run_gateway_mode(args) -> None:
         print(f"存储路径: {args.storage}")
         print(f"监听地址: {args.host}:{args.port}")
         print(f"WebSocket: ws://{args.host}:{args.port}/api/ws/gateway")
+        if settings.qq.enabled:
+            print(f"QQ: 已启用 (appid={settings.qq.appid})")
+        else:
+            print("QQ: 未启用")
         print("=" * 60)
 
         await start_gateway_server(
@@ -203,6 +213,7 @@ async def _run_gateway_mode(args) -> None:
             storage_path=args.storage,
             host=args.host,
             port=args.port,
+            settings=settings,
         )
 
 

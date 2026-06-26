@@ -61,6 +61,8 @@ class MessageNormalizer:
             return self._normalize_whatsapp(raw_message)
         elif channel == "slack":
             return self._normalize_slack(raw_message)
+        elif channel == "qq":
+            return self._normalize_qq(raw_message)
         else:
             return self._normalize_generic(raw_message, channel)
 
@@ -172,6 +174,22 @@ class MessageNormalizer:
             text=msg.get("text", ""),
             channel="slack",
             sender_id=msg.get("user", ""),
+            metadata={"raw": msg},
+        )
+
+    def _normalize_qq(self, msg: dict[str, Any]) -> UnifiedMessage:
+        """归一化 QQ 消息"""
+        return UnifiedMessage(
+            text=msg.get("content", ""),
+            channel="qq",
+            sender_id=msg.get("openid", ""),
+            sender_name=msg.get("nickname", ""),
+            channelSpecific={
+                "guild_id": msg.get("guild_id"),
+                "channel_id": msg.get("channel_id"),
+                "msg_type": msg.get("msg_type"),
+                "timestamp": msg.get("timestamp"),
+            },
             metadata={"raw": msg},
         )
 

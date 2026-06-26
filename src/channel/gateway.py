@@ -318,6 +318,7 @@ class Gateway:
 
         # 5. 如果没有处理器，使用 Agent
         if response_text is None and self._agent_pool:
+            agent = None
             try:
                 agent = await self._agent_pool.get_agent(agent_id)
                 response = await agent.chat(unified.text)
@@ -326,12 +327,13 @@ class Gateway:
                 # 添加助手消息到会话
                 session.add_message("assistant", response_text or "")
 
-                # 释放 Agent（标记为空闲）
-                await self._agent_pool.release_agent(agent_id)
-
             except Exception as e:
-                logger.error(f"Agent 处理消息失败: {e}")
+                logger.error(f"Agent 处理消息失败: {e}", exc_info=True)
                 response_text = f"处理消息时出错: {e}"
+            finally:
+                # 释放 Agent（标记为空闲）
+                if agent is not None:
+                    await self._agent_pool.release_agent(agent_id)
 
         return response_text
 

@@ -112,6 +112,16 @@ class GatewayConfig(BaseModel):
     startup_timeout: int = 10
 
 
+class QQConfig(BaseModel):
+    """QQ 机器人配置"""
+    enabled: bool = False
+    appid: str = ""
+    appsecret: str = ""
+    mode: str = "webhook"  # "webhook" 或 "polling"
+    webhook_path: str = "/webhook/qq"
+    polling_interval: int = 5
+
+
 class Settings(BaseModel):
     """应用全局配置"""
     llm: LLMConfig = Field(default_factory=LLMConfig)
@@ -123,6 +133,7 @@ class Settings(BaseModel):
     security: SecurityConfig = Field(default_factory=SecurityConfig)
     skills: SkillsConfig = Field(default_factory=SkillsConfig)
     gateway: GatewayConfig = Field(default_factory=GatewayConfig)
+    qq: QQConfig = Field(default_factory=QQConfig)
 
 
 _ENV_VAR_PATTERN = re.compile(r"\$\{([^}]+)\}")
@@ -260,6 +271,11 @@ def load_settings_from_env(
     gateway_pid_dir = os.environ.get("GATEWAY_PID_DIR", "~/.Zclaw")
     gateway_timeout = int(os.environ.get("GATEWAY_STARTUP_TIMEOUT", "10"))
 
+    # QQ 配置
+    qq_enabled = os.environ.get("QQ_ENABLED", "").lower() in ("1", "true", "yes")
+    qq_appid = os.environ.get("QQ_APPID", "")
+    qq_appsecret = os.environ.get("QQ_APPSECRET", "")
+
     # Step 3: 构建配置字典
     config_data: dict[str, Any] = {
         "llm": {
@@ -292,6 +308,11 @@ def load_settings_from_env(
             "port": gateway_port,
             "pid_dir": gateway_pid_dir,
             "startup_timeout": gateway_timeout,
+        },
+        "qq": {
+            "enabled": qq_enabled,
+            "appid": qq_appid,
+            "appsecret": qq_appsecret,
         },
     }
 

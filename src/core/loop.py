@@ -368,7 +368,11 @@ class AgentLoop:
                 if not response.tool_calls:
                     self._state.transition(AgentState.DONE)
                     return response
-                results = await self._execute_tool_calls(response.tool_calls)
+                # _execute_tool_calls 是 AsyncIterator，需要用 async for 消费
+                results = None
+                async for result in self._execute_tool_calls(response.tool_calls):
+                    if isinstance(result, list):
+                        results = result
                 self._inject_tool_results(results)
             self._state.transition(AgentState.DONE)
             return Response(
