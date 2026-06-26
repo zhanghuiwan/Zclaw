@@ -1,16 +1,4 @@
-"""
-P10 验证测试 - Web UI 模块
-
-测试 Web 模块的所有核心组件：
-1. 数据模型 (schemas.py)
-2. WebSocket 管理器 (ws_manager.py)
-3. FastAPI 路由 (routes.py, server.py)
-4. 静态文件存在性
-5. 配置集成
-
-运行方式: python -m pytest tests/validate_p10.py -v
-         或: python tests/validate_p10.py
-"""
+"""Web schemas, WebSocket manager, server, routes, static assets, and entrypoint tests."""
 
 import asyncio
 import json
@@ -20,45 +8,11 @@ import tempfile
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
-# 确保项目根目录在 Python 路径中
+
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
+
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
-
-passed = 0
-failed = 0
-errors = []
-
-
-def run_test(name, func):
-    """运行单个测试并记录结果。"""
-    global passed, failed, errors
-    try:
-        func()
-        passed += 1
-        print(f"  ✅ {name}")
-    except Exception as e:
-        failed += 1
-        errors.append((name, str(e)))
-        print(f"  ❌ {name}: {e}")
-
-
-def run_async_test(name, func):
-    """运行异步测试。"""
-    global passed, failed, errors
-    try:
-        asyncio.run(func())
-        passed += 1
-        print(f"  ✅ {name}")
-    except Exception as e:
-        failed += 1
-        errors.append((name, str(e)))
-        print(f"  ❌ {name}: {e}")
-
-
-# ============================================================
-# Test 1: 数据模型 (schemas.py)
-# ============================================================
 
 def test_schemas_import():
     """测试 schemas 模块可以正确导入。"""
@@ -74,7 +28,6 @@ def test_schemas_import():
     assert WSMessageType.CHAT.value == "chat"
     assert WSMessageType.STREAM_DELTA.value == "stream_delta"
 
-
 def test_schemas_chat_request_validation():
     """测试 ChatRequest 模型验证。"""
     from src.web.schemas import ChatRequest
@@ -87,7 +40,6 @@ def test_schemas_chat_request_validation():
         assert False, "空消息应该验证失败"
     except Exception:
         pass
-
 
 def test_schemas_ws_message_types():
     """测试 WebSocket 消息类型。"""
@@ -109,7 +61,6 @@ def test_schemas_ws_message_types():
     resp = WSPermissionResponse(data={"request_id": "abc", "allowed": True})
     assert resp.data["allowed"] is True
 
-
 def test_schemas_tool_info():
     """测试 ToolInfo 模型。"""
     from src.web.schemas import ToolInfo
@@ -124,7 +75,6 @@ def test_schemas_tool_info():
     assert len(tool.parameters) == 1
     json_str = tool.model_dump_json()
     assert "file_read" in json_str
-
 
 def test_schemas_agent_status():
     """测试 AgentStatus 模型。"""
@@ -144,17 +94,11 @@ def test_schemas_agent_status():
     assert status.tools_count == 9
     assert status.usage["total_tokens"] == 300
 
-
-# ============================================================
-# Test 2: WebSocket 管理器 (ws_manager.py)
-# ============================================================
-
 def test_ws_manager_creation():
     """测试 ConnectionManager 创建。"""
     from src.web.ws_manager import ConnectionManager
     manager = ConnectionManager()
     assert manager.active_connections == 0
-
 
 async def test_ws_manager_connect_disconnect():
     """测试连接和断开。"""
@@ -174,7 +118,6 @@ async def test_ws_manager_connect_disconnect():
     manager.disconnect(conn_id)
     assert manager.active_connections == 0
 
-
 async def test_ws_manager_send_json():
     """测试发送 JSON 消息。"""
     from src.web.ws_manager import ConnectionManager
@@ -193,7 +136,6 @@ async def test_ws_manager_send_json():
     # 发送给不存在的连接
     result = await manager.send_json("nonexistent", {"type": "test"})
     assert result is False
-
 
 async def test_ws_manager_broadcast():
     """测试广播消息。"""
@@ -215,7 +157,6 @@ async def test_ws_manager_broadcast():
     # 排除一个连接
     count = await manager.broadcast({"type": "test"}, exclude=conn_id1)
     assert count == 1
-
 
 async def test_ws_manager_permission():
     """测试权限请求/响应机制。"""
@@ -245,7 +186,6 @@ async def test_ws_manager_permission():
     )
     assert result is True
 
-
 async def test_ws_manager_permission_timeout():
     """测试权限请求超时。"""
     from src.web.ws_manager import ConnectionManager
@@ -266,11 +206,6 @@ async def test_ws_manager_permission_timeout():
         timeout=0.5,
     )
     assert result is False  # 超时返回 False
-
-
-# ============================================================
-# Test 3: FastAPI 应用 (server.py)
-# ============================================================
 
 def test_server_creation():
     """测试 FastAPI 应用创建。"""
@@ -299,7 +234,6 @@ def test_server_creation():
     assert "/api/sessions" in routes
     assert "/api/cost" in routes
     assert "/api/config" in routes
-
 
 def test_server_with_agent():
     """测试带 Agent 参数的创建。"""
@@ -330,11 +264,6 @@ def test_server_with_agent():
     app = create_app(agent=mock_agent, settings=mock_settings)
     assert app is not None
 
-
-# ============================================================
-# Test 4: 静态文件
-# ============================================================
-
 def test_static_files_exist():
     """测试静态文件存在。"""
     static_dir = PROJECT_ROOT / "src" / "web" / "static"
@@ -344,7 +273,6 @@ def test_static_files_exist():
     assert (static_dir / "index.html").exists(), "index.html 不存在"
     assert (static_dir / "css" / "style.css").exists(), "style.css 不存在"
     assert (static_dir / "js" / "app.js").exists(), "app.js 不存在"
-
 
 def test_index_html_content():
     """测试 index.html 包含关键元素。"""
@@ -364,7 +292,6 @@ def test_index_html_content():
     assert "/static/css/style.css" in content
     assert "/static/js/app.js" in content
 
-
 def test_css_content():
     """测试 CSS 文件包含关键样式。"""
     css_path = PROJECT_ROOT / "src" / "web" / "static" / "css" / "style.css"
@@ -379,7 +306,6 @@ def test_css_content():
     assert ".tool-card" in content
     assert ".permission-dialog" in content
     assert "@media" in content  # 响应式设计
-
 
 def test_js_content():
     """测试 JavaScript 文件包含关键功能。"""
@@ -398,11 +324,6 @@ def test_js_content():
     assert "loadTools" in content
     assert "loadSessions" in content
 
-
-# ============================================================
-# Test 5: 配置集成
-# ============================================================
-
 def test_web_config():
     """测试 WebConfig 在 Settings 中。"""
     from src.config.settings import Settings, WebConfig
@@ -420,7 +341,6 @@ def test_web_config():
     assert custom.web.host == "127.0.0.1"
     assert custom.web.port == 9090
 
-
 def test_web_config_serialization():
     """测试 WebConfig 序列化。"""
     from src.config.settings import Settings
@@ -428,7 +348,6 @@ def test_web_config_serialization():
     data = settings.model_dump()
     assert "web" in data
     assert data["web"]["port"] == 8080
-
 
 def test_console_script_uses_simple_entrypoint():
     """测试 Zclaw 命令和 python main.py 共用简易入口。"""
@@ -439,7 +358,6 @@ def test_console_script_uses_simple_entrypoint():
     pyproject = tomllib.loads((PROJECT_ROOT / "pyproject.toml").read_text(encoding="utf-8"))
     assert pyproject["project"]["scripts"]["Zclaw"] == "src.cli.simple:main"
     assert root_main.main is simple_main
-
 
 def test_simple_entrypoint_env_resolution():
     """测试简易入口允许无 .env 时使用环境变量。"""
@@ -460,24 +378,17 @@ def test_simple_entrypoint_env_resolution():
     with patch.dict(os.environ, {}, clear=True):
         assert not has_required_env_config()
 
-
-# ============================================================
-# Test 6: 路由模块导入和基础功能
-# ============================================================
-
 def test_routes_import():
     """测试路由模块可以正确导入。"""
     from src.web.routes import router, ws_manager
     assert router is not None
     assert ws_manager is not None
 
-
 def test_routes_ws_manager_singleton():
     """测试 WebSocket 管理器是模块级单例。"""
     from src.web.routes import ws_manager
     from src.web.ws_manager import ConnectionManager
     assert isinstance(ws_manager, ConnectionManager)
-
 
 async def test_routes_web_permission_returns_bool():
     """测试 Web 权限回调拒绝时返回 False。"""
@@ -501,7 +412,6 @@ async def test_routes_web_permission_returns_bool():
     result = await routes._request_web_permission("conn", safe_request)
     assert result is True
 
-
 async def test_routes_compact_writes_back():
     """测试 Web compact 会把压缩结果写回 loop。"""
     from src.web import routes
@@ -516,7 +426,6 @@ async def test_routes_compact_writes_back():
 
     assert agent.loop._messages == ["system", "summary", "recent"]
     send_json.assert_awaited()
-
 
 async def test_routes_load_session_deserializes_messages():
     """测试 Web session load 将 dict 恢复为 Message。"""
@@ -541,68 +450,6 @@ async def test_routes_load_session_deserializes_messages():
     assert all(isinstance(msg, Message) for msg in added)
     assert added[1].tool_calls[0].name == "file_read"
 
-
-# ============================================================
-# 运行所有测试
-# ============================================================
-
-def main():
-    print("=" * 60)
-    print("P10 验证测试 - Web UI 模块")
-    print("=" * 60)
-
-    print("\n📦 1. 数据模型 (schemas.py)")
-    run_test("schemas 导入和类型检查", test_schemas_import)
-    run_test("ChatRequest 验证", test_schemas_chat_request_validation)
-    run_test("WS 消息类型", test_schemas_ws_message_types)
-    run_test("ToolInfo 模型", test_schemas_tool_info)
-    run_test("AgentStatus 模型", test_schemas_agent_status)
-
-    print("\n🔌 2. WebSocket 管理器 (ws_manager.py)")
-    run_test("ConnectionManager 创建", test_ws_manager_creation)
-    run_async_test("连接和断开", test_ws_manager_connect_disconnect)
-    run_async_test("发送 JSON 消息", test_ws_manager_send_json)
-    run_async_test("广播消息", test_ws_manager_broadcast)
-    run_async_test("权限请求/响应", test_ws_manager_permission)
-    run_async_test("权限请求超时", test_ws_manager_permission_timeout)
-
-    print("\n🌐 3. FastAPI 应用 (server.py)")
-    run_test("应用创建和路由注册", test_server_creation)
-    run_test("带 Agent 参数创建", test_server_with_agent)
-
-    print("\n📁 4. 静态文件")
-    run_test("静态文件存在性", test_static_files_exist)
-    run_test("index.html 内容", test_index_html_content)
-    run_test("CSS 内容", test_css_content)
-    run_test("JavaScript 内容", test_js_content)
-
-    print("\n⚙️  5. 配置集成")
-    run_test("WebConfig 在 Settings 中", test_web_config)
-    run_test("WebConfig 序列化", test_web_config_serialization)
-    run_test("Zclaw 与 main.py 入口一致", test_console_script_uses_simple_entrypoint)
-    run_test("简易入口环境变量配置", test_simple_entrypoint_env_resolution)
-
-    print("\n🛣️  6. 路由模块")
-    run_test("路由模块导入", test_routes_import)
-    run_test("WS 管理器单例", test_routes_ws_manager_singleton)
-    run_async_test("Web 权限返回 bool", test_routes_web_permission_returns_bool)
-    run_async_test("Web compact 写回", test_routes_compact_writes_back)
-    run_async_test("Web session load 反序列化", test_routes_load_session_deserializes_messages)
-
-    # 汇总
-    print("\n" + "=" * 60)
-    total = passed + failed
-    print(f"结果: {passed}/{total} 通过, {failed} 失败")
-    print("=" * 60)
-
-    if errors:
-        print("\n失败详情:")
-        for name, err in errors:
-            print(f"  - {name}: {err}")
-
-    return failed == 0
-
-
 class Mock:
     """Simple mock helper for __len__."""
     def __init__(self, return_value):
@@ -610,8 +457,3 @@ class Mock:
 
     def __call__(self):
         return self.return_value
-
-
-if __name__ == "__main__":
-    success = main()
-    sys.exit(0 if success else 1)

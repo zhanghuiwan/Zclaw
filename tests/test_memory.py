@@ -1,32 +1,19 @@
-"""
-P8 - V4 记忆系统验证
-
-覆盖：
-1. 记忆提取器
-2. L0-L4 分层和 MemoryCoordinator
-3. 记忆工具
-4. extract_and_store 分发逻辑
-5. Agent 集成
-
-运行方式: python -m pytest tests/validate_p8.py -v
-         或: python tests/validate_p8.py
-"""
+"""Layered memory, memory tools, extraction, and agent memory tests."""
 
 from __future__ import annotations
-
 import asyncio
 import sys
 import tempfile
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock
-
-PROJECT_ROOT = Path(__file__).resolve().parent.parent
-if str(PROJECT_ROOT) not in sys.path:
-    sys.path.insert(0, str(PROJECT_ROOT))
-
 from src.llm.models import Message, MessageRole, StreamEvent, StreamEventType
 from src.memory.extractor import BaseExtractor, ExtractedMemory, LLMExtractor, MockExtractor
 
+
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
+
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
 
 async def test_extractor_base():
     print("=" * 60)
@@ -72,7 +59,6 @@ async def test_extractor_base():
     assert llm_ext._parse_response("无 JSON") == []
     print("  OK LLMExtractor JSON 解析")
     print()
-
 
 async def test_memory_coordinator_layers():
     print("=" * 60)
@@ -133,7 +119,6 @@ async def test_memory_coordinator_layers():
         print("  OK system prompt context")
     print()
 
-
 async def test_memory_tools():
     print("=" * 60)
     print("3. 测试 V4 记忆工具")
@@ -178,7 +163,6 @@ async def test_memory_tools():
         print("  OK set_preference")
     print()
 
-
 async def test_extract_and_store():
     print("=" * 60)
     print("4. 测试 extract_and_store 分发")
@@ -219,7 +203,6 @@ async def test_extract_and_store():
         print("  OK extracted memories routed to L1/L2/L3")
     print()
 
-
 async def test_agent_memory_integration():
     print("=" * 60)
     print("5. 测试 Agent 记忆集成")
@@ -253,7 +236,6 @@ async def test_agent_memory_integration():
         assert agent.memory.build_system_prompt_context()
         print("  OK Agent 注册 V4 记忆与工具")
     print()
-
 
 async def test_agent_stream_memory_extraction_background():
     print("=" * 60)
@@ -311,41 +293,3 @@ async def test_agent_stream_memory_extraction_background():
         assert agent.memory.extract_and_store.await_count == 1
         print("  OK chat_stream 不等待记忆提取完成")
     print()
-
-
-async def main():
-    tests = [
-        test_extractor_base,
-        test_memory_coordinator_layers,
-        test_memory_tools,
-        test_extract_and_store,
-        test_agent_memory_integration,
-        test_agent_stream_memory_extraction_background,
-    ]
-    passed = 0
-    failed = 0
-    failures = []
-    print("=" * 60)
-    print("        Zclaw P8 - V4 记忆系统验证")
-    print("=" * 60)
-    for test in tests:
-        try:
-            await test()
-            passed += 1
-        except Exception as exc:
-            failed += 1
-            failures.append((test.__name__, str(exc)))
-            print(f"  FAILED {test.__name__}: {exc}")
-
-    print("=" * 60)
-    print(f"结果: {passed}/{len(tests)} 通过, {failed} 失败")
-    print("=" * 60)
-    if failures:
-        for name, error in failures:
-            print(f"  - {name}: {error}")
-    return failed == 0
-
-
-if __name__ == "__main__":
-    ok = asyncio.run(main())
-    sys.exit(0 if ok else 1)

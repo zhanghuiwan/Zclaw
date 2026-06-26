@@ -63,7 +63,7 @@ class Renderer:
         banner.append("┌" + "─" * 58 + "┐\n", style="info")
         # 标题
         banner.append("│", style="info")
-        banner.append("  🐾 Zclaw v0.6.1", style="bold cyan")
+        banner.append("  🏹 Zclaw v0.6.1", style="bold cyan")
         banner.append(" " * 33 + "│\n", style="info")
         # 副标题
         banner.append("│", style="info")

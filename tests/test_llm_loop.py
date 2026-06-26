@@ -1,14 +1,10 @@
-"""
-P1 End-to-End Validation - Tool system, sandbox, loop integration.
-"""
+"""Tool registry, sandbox, shell, and agent loop tests."""
 
 import asyncio
 import os
 import sys
 import tempfile
 from pathlib import Path
-
-sys.path.insert(0, str(Path(__file__).parent.parent))
 
 
 async def test_tool_base():
@@ -27,7 +23,6 @@ async def test_tool_base():
     assert schema["type"] == "string"
     print("  OK ToolParameter.to_json_schema")
     print()
-
 
 async def test_registry():
     print("=" * 60)
@@ -66,7 +61,6 @@ async def test_registry():
     print(f"  OK Stats: {stats}")
     print()
 
-
 async def test_file_tools():
     print("=" * 60)
     print("3. Testing File Tools")
@@ -100,7 +94,6 @@ async def test_file_tools():
         print("  OK file_edit: not found error")
     print()
 
-
 async def test_search_tools():
     print("=" * 60)
     print("4. Testing Search Tools")
@@ -130,7 +123,6 @@ async def test_search_tools():
         print("  OK file_search: no results")
     print()
 
-
 async def test_sandbox():
     print("=" * 60)
     print("5. Testing Sandbox")
@@ -151,7 +143,6 @@ async def test_sandbox():
     assert not r4.success
     print("  OK Error handling: exit=2")
     print()
-
 
 async def test_shell_tool():
     print("=" * 60)
@@ -183,7 +174,6 @@ async def test_shell_tool():
     assert r1.success
     print("  OK Execute safe command")
     print()
-
 
 async def test_loop_tools():
     print("=" * 60)
@@ -223,7 +213,6 @@ async def test_loop_tools():
     print("  OK Tool result injection")
     print()
 
-
 async def test_full_agent():
     print("=" * 60)
     print("8. Testing Full Agent Initialization")
@@ -258,7 +247,6 @@ async def test_full_agent():
     print(f"  OK OpenAI tool definitions: {len(agent.tools.to_openai_tools())} tools")
     print()
 
-
 async def test_stream_events():
     print("=" * 60)
     print("9. Testing Stream Event Types")
@@ -277,32 +265,3 @@ async def test_stream_events():
     e3 = StreamEvent(type=StreamEventType.LOOP_START, data={"round": 2})
     print("  OK LOOP_START event")
     print()
-
-
-async def main():
-    print()
-    print("=" * 60)
-    print("        Zclaw P1 - End-to-End Validation")
-    print("=" * 60)
-    print()
-    tests = [test_tool_base, test_registry, test_file_tools, test_search_tools, test_sandbox, test_shell_tool, test_loop_tools, test_full_agent, test_stream_events]
-    passed = 0
-    failed = 0
-    for test in tests:
-        try:
-            await test()
-            passed += 1
-        except Exception as e:
-            print(f"  FAILED: {e}")
-            import traceback
-            traceback.print_exc()
-            failed += 1
-    print("=" * 60)
-    print(f"Results: {passed} passed, {failed} failed")
-    print("=" * 60)
-    if failed > 0:
-        sys.exit(1)
-
-
-if __name__ == "__main__":
-    asyncio.run(main())

@@ -86,7 +86,7 @@ function getFileIcon(name, isDir) {
         json: '📋', yaml: '⚙️', yml: '⚙️', toml: '⚙️',
         md: '📝', txt: '📄', csv: '📊',
         html: '🌐', css: '🎨', scss: '🎨',
-        rs: '🦀', go: '🔵', java: '☕', c: '🔧', cpp: '🔧', h: '🔧',
+        rs: '🏹', go: '🔵', java: '☕', c: '🔧', cpp: '🔧', h: '🔧',
         sh: '🖥️', bash: '🖥️',
         png: '🖼️', jpg: '🖼️', jpeg: '🖼️', gif: '🖼️', svg: '🖼️',
         lock: '🔒', env: '🔐',
@@ -422,7 +422,7 @@ function handleError(data) {
     const msgEl = document.createElement('div');
     msgEl.className = 'message assistant';
     msgEl.innerHTML = `
-        <div class="message-avatar">🦀</div>
+        <div class="message-avatar">🏹</div>
         <div class="message-content">
             <div class="message-role">助手 · 错误</div>
             <div class="message-body" style="color: var(--accent-danger);">${escapeHtml(errorMsg)}</div>
@@ -488,7 +488,7 @@ function createAssistantMessage() {
     const el = document.createElement('div');
     el.className = 'message assistant';
     el.innerHTML = `
-        <div class="message-avatar">🦀</div>
+        <div class="message-avatar">🏹</div>
         <div class="message-content">
             <div class="message-role">助手</div>
             <div class="message-body"><div class="typing-indicator"><span class="typing-dot"></span><span class="typing-dot"></span><span class="typing-dot"></span></div></div>
@@ -655,7 +655,7 @@ async function loadConfig() {
 
     // Agent Section
     html += '<div class="settings-section">';
-    html += '<div class="settings-section-header">🦀 Agent 配置</div>';
+    html += '<div class="settings-section-header">🏹 Agent 配置</div>';
     html += settingsRow('最大循环轮次', data.agent.max_loop_rounds);
     html += settingsRow('规划模式', data.agent.planning_mode);
     html += '</div>';
@@ -814,7 +814,7 @@ async function loadHistory() {
             const el = document.createElement('div');
             el.className = 'message assistant';
             el.innerHTML = `
-                <div class="message-avatar">🦀</div>
+                <div class="message-avatar">🏹</div>
                 <div class="message-content">
                     <div class="message-role">助手</div>
                     <div class="message-body">${simpleMarkdown(msg.content || '')}</div>
@@ -834,7 +834,7 @@ function createWelcomeMessage() {
     el.className = 'welcome-message';
     el.id = 'welcomeMessage';
     el.innerHTML = `
-        <div class="welcome-icon">🦀</div>
+        <div class="welcome-icon">🏹</div>
         <h2>欢迎使用 Zclaw</h2>
         <p>Claude Code 风格 AI 编程助手</p>
         <div class="welcome-hints">

@@ -1,161 +1,88 @@
-"""
-Skills 模块验证脚本
+"""Tests for deterministic skill discovery, matching, and tool wrapping."""
 
-测试 skills 模块的基本功能。
-"""
+from __future__ import annotations
 
-import sys
 from pathlib import Path
 
-# 确保项目根目录在 Python 路径中
-PROJECT_ROOT = Path(__file__).resolve().parent.parent
-if str(PROJECT_ROOT) not in sys.path:
-    sys.path.insert(0, str(PROJECT_ROOT))
-
-from src.skills import SkillManager, SkillsConfig
+from src.skills import SkillManager
+from src.skills.config import SkillsConfig
 from src.skills.models import SkillDefinition
+from src.skills.tool import SkillTool
 
 
-def test_skill_discovery():
-    """测试 skill 发现功能"""
-    print("\n" + "=" * 50)
-    print("测试 1: Skill 发现功能")
-    print("=" * 50)
+def _write_skill(root: Path, name: str, description: str, triggers: list[str]) -> Path:
+    skill_dir = root / name
+    skill_dir.mkdir(parents=True)
+    triggers_yaml = "\n".join(f"      - {trigger}" for trigger in triggers)
+    (skill_dir / "SKILL.md").write_text(
+        f"""---
+name: {name}
+description: {description}
+version: 0.6.1
+metadata:
+  openclaw:
+    triggers:
+{triggers_yaml}
+---
 
-    config = SkillsConfig.with_defaults(project_root=PROJECT_ROOT)
-    print(f"全局路径：{config.global_path}")
-    print(f"项目路径：{config.project_path}")
+# {name}
 
-    manager = SkillManager(config)
-    manager.initialize()
-    skills = manager.list_skills()
-
-    print(f"\n发现 {len(skills)} 个 skills:")
-    for skill in skills:
-        print(f"  - {skill.name}: {skill.description}")
-        if skill.triggers:
-            print(f"    触发词：{', '.join(skill.triggers[:5])}")
-
-    return len(skills) > 0
-
-
-def test_skill_matching():
-    """测试 skill 匹配功能"""
-    print("\n" + "=" * 50)
-    print("测试 2: Skill 匹配功能")
-    print("=" * 50)
-
-    config = SkillsConfig.with_defaults(project_root=PROJECT_ROOT)
-    manager = SkillManager(config)
-    manager.initialize()
-
-    test_queries = [
-        "搜索附近的美食",
-        "规划路线",
-        "查一下天安门",
-        "生成热力图",
-    ]
-
-    for query in test_queries:
-        matches = manager.match_skills(query)
-        print(f"\n查询：'{query}'")
-        if matches:
-            for match in matches:
-                print(f"  → 匹配：{match.name}")
-        else:
-            print("  → 无匹配")
-
-    return True
+Use this skill when the request mentions {', '.join(triggers)}.
+""",
+        encoding="utf-8",
+    )
+    return skill_dir
 
 
-def test_skill_context():
-    """测试 skill 上下文注入"""
-    print("\n" + "=" * 50)
-    print("测试 3: Skill 上下文注入")
-    print("=" * 50)
+def test_skill_definition_parses_frontmatter(tmp_path: Path):
+    skill_dir = _write_skill(tmp_path, "python-helper", "Python project helper", ["python", "pytest"])
 
-    config = SkillsConfig.with_defaults(project_root=PROJECT_ROOT)
-    manager = SkillManager(config)
-    manager.initialize()
+    skill = SkillDefinition.from_file(skill_dir)
 
-    query = "搜索西直门周边美食"
-    context = manager.get_context(query)
-
-    print(f"查询：'{query}'")
-    print(f"上下文长度：{len(context)} 字符")
-    if context:
-        print("\n上下文预览:")
-        print(context[:500] + "..." if len(context) > 500 else context)
-
-    return True
+    assert skill.name == "python-helper"
+    assert skill.description == "Python project helper"
+    assert skill.version == "0.6.1"
+    assert skill.triggers == ["python", "pytest"]
+    assert "Use this skill" in skill.content
 
 
-def test_skill_execution():
-    """测试 skill 执行功能"""
-    print("\n" + "=" * 50)
-    print("测试 4: Skill 执行功能")
-    print("=" * 50)
+def test_skill_manager_discovers_and_matches(isolated_skills_config: SkillsConfig):
+    _write_skill(
+        isolated_skills_config.project_path,
+        "python-helper",
+        "Python project helper",
+        ["python", "pytest"],
+    )
 
-    config = SkillsConfig.with_defaults(project_root=PROJECT_ROOT)
-    manager = SkillManager(config)
-    manager.initialize()
+    manager = SkillManager(isolated_skills_config)
+    assert manager.initialize() == 1
 
     skills = manager.list_skills()
-    if not skills:
-        print("没有可用的 skills，跳过执行测试")
-        return False
+    assert [skill.name for skill in skills] == ["python-helper"]
 
-    # 测试第一个 skill
-    skill = skills[0]
-    print(f"执行 skill: {skill.name}")
-    print(f"描述：{skill.description}")
-    print(f"Triggers：{skill.triggers}")
-    print(f"Requires env：{skill.requires.env_vars}")
+    matches = manager.match_skills("请帮我运行 pytest")
+    assert [skill.name for skill in matches] == ["python-helper"]
 
-    # execute_skill 是 async 方法，这里简单测试可用性
-    print("✓ Skill 结构和依赖检查通过（异步执行需要 await）")
-    return True
+    context = manager.get_context("python 测试")
+    assert "python-helper" in context
+    assert "Python project helper" in context
 
 
-def main():
-    """运行所有测试"""
-    print("\n" + "=" * 60)
-    print("  Zclaw Skills 模块验证")
-    print("=" * 60)
+def test_skill_manager_disabled_returns_no_context(isolated_skills_config: SkillsConfig):
+    isolated_skills_config.enabled = False
 
-    tests = [
-        ("Skill 发现", test_skill_discovery),
-        ("Skill 匹配", test_skill_matching),
-        ("上下文注入", test_skill_context),
-        ("Skill 执行", test_skill_execution),
-    ]
-
-    results = []
-    for name, test_func in tests:
-        try:
-            success = test_func()
-            results.append((name, success))
-        except Exception as e:
-            print(f"\n❌ {name} 测试失败：{e}")
-            results.append((name, False))
-
-    # 汇总结果
-    print("\n" + "=" * 60)
-    print("  测试结果汇总")
-    print("=" * 60)
-
-    passed = sum(1 for _, success in results if success)
-    total = len(results)
-
-    for name, success in results:
-        status = "✓" if success else "✗"
-        print(f"  {status} {name}")
-
-    print(f"\n总计：{passed}/{total} 通过")
-
-    return passed == total
+    manager = SkillManager(isolated_skills_config)
+    assert manager.initialize() == 0
+    assert manager.match_skills("python") == []
+    assert manager.get_context("python") == ""
 
 
-if __name__ == "__main__":
-    success = main()
-    sys.exit(0 if success else 1)
+def test_skill_tool_exposes_definition(tmp_path: Path):
+    skill = SkillDefinition.from_file(
+        _write_skill(tmp_path, "docs-helper", "Documentation helper", ["docs"])
+    )
+    tool = SkillTool(skill)
+
+    assert tool.name == "skill__docs-helper"
+    assert "Documentation helper" in tool.description
+    assert tool.danger_level.value == "safe"

@@ -1,20 +1,11 @@
-"""
-P9 - MCP (Model Context Protocol) 集成验证
-"""
+"""MCP types, transports, client, adapter, manager, and agent integration tests."""
 
 from __future__ import annotations
-
 import asyncio
 import json
 import sys
 import tempfile
 from pathlib import Path
-
-# 确保项目根目录在 Python 路径中
-PROJECT_ROOT = Path(__file__).resolve().parent.parent
-if str(PROJECT_ROOT) not in sys.path:
-    sys.path.insert(0, str(PROJECT_ROOT))
-
 from src.mcp.types import MCPServerConfig, MCPTransportType, MCPToolDefinition
 from src.mcp.transport import (
     MockTransport, StdioTransport, SSETransport,
@@ -26,9 +17,10 @@ from src.mcp.manager import MCPManager
 from src.config.settings import MCPConfig
 
 
-# ──────────────────────────────────────────────
-# 1. MCP 数据类型测试
-# ──────────────────────────────────────────────
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
+
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
 
 async def test_types():
     """测试 MCP 数据类型和配置"""
@@ -104,11 +96,6 @@ async def test_types():
     print("  OK MCPConfig 默认值")
 
     print()
-
-
-# ──────────────────────────────────────────────
-# 2. 传输层测试
-# ──────────────────────────────────────────────
 
 async def test_transport():
     """测试 MCP 传输层"""
@@ -216,11 +203,6 @@ async def test_transport():
 
     print()
 
-
-# ──────────────────────────────────────────────
-# 3. MCP 客户端测试
-# ──────────────────────────────────────────────
-
 async def test_client():
     """测试 MCP 客户端"""
     print("=" * 60)
@@ -297,11 +279,6 @@ async def test_client():
         print("  OK MCPClient 未初始化时调用抛出异常")
 
     print()
-
-
-# ──────────────────────────────────────────────
-# 4. 工具适配器测试
-# ──────────────────────────────────────────────
 
 async def test_adapter():
     """测试 MCP 工具适配器"""
@@ -398,11 +375,6 @@ async def test_adapter():
 
     await client.close()
     print()
-
-
-# ──────────────────────────────────────────────
-# 5. MCP 管理器测试
-# ──────────────────────────────────────────────
 
 async def test_manager():
     """测试 MCP 管理器"""
@@ -513,11 +485,6 @@ async def test_manager():
 
     print()
 
-
-# ──────────────────────────────────────────────
-# 6. Agent 集成测试
-# ──────────────────────────────────────────────
-
 async def test_agent_integration():
     """测试 MCP 与 Agent 的集成"""
     print("=" * 60)
@@ -596,28 +563,3 @@ async def test_agent_integration():
         print("  OK Agent.shutdown_mcp")
 
     print()
-
-
-# ──────────────────────────────────────────────
-
-async def main():
-    print()
-    print("=" * 60)
-    print("        Zclaw P9 - MCP 集成验证")
-    print("=" * 60)
-    print()
-
-    await test_types()
-    await test_transport()
-    await test_client()
-    await test_adapter()
-    await test_manager()
-    await test_agent_integration()
-
-    print("=" * 60)
-    print("Results: 6 passed, 0 failed")
-    print("=" * 60)
-
-
-if __name__ == "__main__":
-    asyncio.run(main())

@@ -256,8 +256,8 @@ def main():
     import argparse
 
     parser = argparse.ArgumentParser(
-        prog="Zclaw Chat",
-        description="Zclaw - 简易对话模式 (使用 .env 配置)",
+        prog="zclaw",
+        description="zclaw - 简易对话模式 (使用 .env 配置)",
     )
     parser.add_argument(
         "--env", "-e",

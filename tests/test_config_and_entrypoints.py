@@ -1,12 +1,8 @@
-"""
-P0 End-to-End Validation - Config, LLM models, state machine, loop structure, agent class.
-"""
+"""Configuration, entrypoint, LLM model, and agent bootstrap tests."""
 
 import asyncio
 import sys
 from pathlib import Path
-
-sys.path.insert(0, str(Path(__file__).parent.parent))
 
 
 async def test_config_module():
@@ -30,7 +26,6 @@ async def test_config_module():
     assert s2.llm.providers["bailian"].model == "qwen-plus"
     print("  OK Settings built from YAML config")
     print()
-
 
 async def test_llm_models():
     print("=" * 60)
@@ -63,7 +58,6 @@ async def test_llm_models():
     print("  OK Stream event model")
     print()
 
-
 async def test_llm_router():
     print("=" * 60)
     print("3. Testing LLM Router")
@@ -91,7 +85,6 @@ async def test_llm_router():
     assert tokens > 0
     print(f"  OK Token estimation: {tokens} tokens")
     print()
-
 
 async def test_agent_state():
     print("=" * 60)
@@ -125,7 +118,6 @@ async def test_agent_state():
     print(f"  OK State change listener: {changes}")
     print()
 
-
 async def test_agent_loop():
     print("=" * 60)
     print("5. Testing Agent Loop Structure")
@@ -153,7 +145,6 @@ async def test_agent_loop():
     print("  OK Custom system prompt set")
     print()
 
-
 async def test_agent():
     print("=" * 60)
     print("6. Testing Agent Main Class")
@@ -173,7 +164,6 @@ async def test_agent():
     print("  OK Provider switching at agent level")
     print()
 
-
 async def test_error_hierarchy():
     print("=" * 60)
     print("7. Testing Error Hierarchy")
@@ -189,32 +179,3 @@ async def test_error_hierarchy():
     assert e3.recoverable is True
     print(f"  OK LLMRateLimitError (recoverable={e3.recoverable})")
     print()
-
-
-async def main():
-    print()
-    print("=" * 60)
-    print("        Zclaw P0 - End-to-End Validation")
-    print("=" * 60)
-    print()
-    tests = [test_config_module, test_llm_models, test_llm_router, test_agent_state, test_agent_loop, test_agent, test_error_hierarchy]
-    passed = 0
-    failed = 0
-    for test in tests:
-        try:
-            await test()
-            passed += 1
-        except Exception as e:
-            print(f"  FAILED: {e}")
-            import traceback
-            traceback.print_exc()
-            failed += 1
-    print("=" * 60)
-    print(f"Results: {passed} passed, {failed} failed")
-    print("=" * 60)
-    if failed > 0:
-        sys.exit(1)
-
-
-if __name__ == "__main__":
-    asyncio.run(main())

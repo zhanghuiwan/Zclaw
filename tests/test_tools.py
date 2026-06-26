@@ -1,62 +1,414 @@
-"""
-P11 验证测试 - 高级编辑能力
-
-测试 P11 新增的所有工具：
-1. 行号级编辑工具 (line_edit_tool.py) - line_edit, line_read
-2. Diff 预览工具 (diff_tool.py) - diff, snapshot
-3. Git 集成工具 (git_tool.py) - git_diff, git_commit, git_log, git_status, git_branch, git_show, git_blame
-4. 语法感知编辑 (ast_tool.py) - code_structure, symbol_find, symbol_edit, import_analyze
-
-运行方式: python -m pytest tests/validate_p11.py -v
-         或: python tests/validate_p11.py
-"""
+"""Built-in search, edit, diff, git, cache, and AST tool tests."""
 
 import asyncio
+import json
 import os
 import sys
 import tempfile
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
-# 确保项目根目录在 Python 路径中
+
+async def test_grep_tool():
+    print("=" * 60)
+    print("1. Testing Grep Tool")
+    print("=" * 60)
+    from src.tools.builtin.grep_tool import GrepTool
+    gt = GrepTool()
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        # Create test files
+        os.makedirs(os.path.join(tmpdir, "src"))
+        with open(os.path.join(tmpdir, "src", "main.py"), "w") as f:
+            f.write("import os\nimport sys\n\ndef hello():\n    print('hello')\n\nclass App:\n    pass\n")
+        with open(os.path.join(tmpdir, "src", "utils.py"), "w") as f:
+            f.write("def util_func():\n    return 42\n\ndef import_helper():\n    pass\n")
+
+        # Basic regex search
+        r1 = await gt.execute(path=tmpdir, pattern="import")
+        assert r1.success
+        assert "main.py" in r1.content
+        assert "utils.py" in r1.content
+        print("  OK Basic regex search")
+
+        # Case insensitive
+        r2 = await gt.execute(path=tmpdir, pattern="class", include="*.py")
+        assert r2.success and "App" in r2.content
+        print("  OK Include filter")
+
+        # Exclude filter
+        r3 = await gt.execute(path=tmpdir, pattern="def", exclude="utils.py")
+        assert r3.success
+        assert "main.py" in r3.content
+        print("  OK Exclude filter")
+
+        # Context lines
+        r4 = await gt.execute(path=tmpdir, pattern="hello", context=1)
+        assert r4.success and ">>" in r4.content
+        print("  OK Context lines")
+
+        # No results
+        r5 = await gt.execute(path=tmpdir, pattern="nonexistent_xyz_pattern")
+        assert r5.success and "未找到" in r5.content
+        print("  OK No matches")
+
+        # Invalid regex
+        r6 = await gt.execute(path=tmpdir, pattern="[invalid")
+        assert not r6.success
+        print("  OK Invalid regex rejected")
+
+    print()
+
+async def test_glob_tool():
+    print("=" * 60)
+    print("2. Testing Glob Tool")
+    print("=" * 60)
+    from src.tools.builtin.glob_tool import GlobTool
+    gl = GlobTool()
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        os.makedirs(os.path.join(tmpdir, "src", "core"))
+        with open(os.path.join(tmpdir, "src", "main.py"), "w") as f:
+            f.write("")
+        with open(os.path.join(tmpdir, "src", "utils.py"), "w") as f:
+            f.write("")
+        with open(os.path.join(tmpdir, "src", "core", "agent.py"), "w") as f:
+            f.write("")
+        # Hidden file
+        with open(os.path.join(tmpdir, ".hidden"), "w") as f:
+            f.write("")
+
+        # Match all .py
+        r1 = await gl.execute(path=tmpdir, pattern="**/*.py")
+        assert r1.success
+        assert "main.py" in r1.content
+        assert "utils.py" in r1.content
+        assert "agent.py" in r1.content
+        assert ".hidden" not in r1.content
+        print("  OK **/*.py pattern")
+
+        # Match specific dir
+        r2 = await gl.execute(path=tmpdir, pattern="src/core/*.py")
+        assert r2.success
+        assert "agent.py" in r2.content
+        assert "main.py" not in r2.content
+        print("  OK src/core/*.py pattern")
+
+        # Hidden files excluded
+        r3 = await gl.execute(path=tmpdir, pattern="*")
+        assert ".hidden" not in r3.content
+        print("  OK Hidden files excluded by default")
+
+        # Show hidden
+        r4 = await gl.execute(path=tmpdir, pattern="*", exclude_hidden=False)
+        assert ".hidden" in r4.content
+        print("  OK Hidden files shown when exclude_hidden=False")
+
+        # No match
+        r5 = await gl.execute(path=tmpdir, pattern="**/*.xyz")
+        assert r5.success and "没有文件匹配" in r5.content
+        print("  OK No matches")
+
+    print()
+
+async def test_multi_edit_tool():
+    print("=" * 60)
+    print("3. Testing Multi-Edit Tool")
+    print("=" * 60)
+    from src.tools.builtin.multi_edit_tool import MultiEditTool
+    me = MultiEditTool()
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        p = os.path.join(tmpdir, "test.txt")
+        original = "Line A\nLine B\nLine C\nLine D\n"
+        with open(p, "w") as f:
+            f.write(original)
+
+        # Basic multi edit
+        edits = json.dumps([
+            {"old_text": "Line A", "new_text": "Line 1"},
+            {"old_text": "Line C", "new_text": "Line 3"},
+        ])
+        r1 = await me.execute(path=p, edits=edits)
+        assert r1.success
+        content = open(p).read()
+        assert "Line 1" in content
+        assert "Line B" in content
+        assert "Line 3" in content
+        assert "Line A" not in content
+        print("  OK Multi-edit: two replacements")
+
+        # Atomic rollback on failure
+        r2 = await me.execute(path=p, edits=json.dumps([
+            {"old_text": "Line B", "new_text": "Line 2"},
+            {"old_text": "NOT_FOUND", "new_text": "X"},
+        ]))
+        assert not r2.success
+        content_after = open(p).read()
+        assert content_after == content  # File unchanged
+        print("  OK Atomic rollback on failure")
+
+        # Invalid JSON
+        r3 = await me.execute(path=p, edits="not json")
+        assert not r3.success
+        print("  OK Invalid JSON rejected")
+
+        # Empty edits
+        r4 = await me.execute(path=p, edits="[]")
+        assert not r4.success
+        print("  OK Empty edits rejected")
+
+        # File not found
+        r5 = await me.execute(path="/nonexistent", edits=edits)
+        assert not r5.success
+        print("  OK File not found")
+
+    print()
+
+async def test_tool_cache():
+    print("=" * 60)
+    print("4. Testing Tool Result Cache")
+    print("=" * 60)
+    from src.tools.cache import ToolResultCache
+    from src.tools.base import ToolResult
+
+    cache = ToolResultCache(max_size=5, ttl_seconds=60, enabled=True)
+
+    # Basic put/get
+    r1 = ToolResult.ok("cached result")
+    cache.put("echo", {"text": "hello"}, r1)
+    cached = cache.get("echo", {"text": "hello"})
+    assert cached is not None and cached.success and cached.content == "cached result"
+    print("  OK Basic put/get")
+
+    # Cache miss
+    miss = cache.get("echo", {"text": "different"})
+    assert miss is None
+    print("  OK Cache miss")
+
+    # Key generation deterministic
+    k1 = ToolResultCache.make_key("echo", {"text": "hello"})
+    k2 = ToolResultCache.make_key("echo", {"text": "hello"})
+    k3 = ToolResultCache.make_key("echo", {"text": "world"})
+    assert k1 == k2 and k1 != k3
+    print("  OK Key generation deterministic")
+
+    # Don't cache failures
+    r_fail = ToolResult.fail("error")
+    cache.put("test", {"x": "1"}, r_fail)
+    miss2 = cache.get("test", {"x": "1"})
+    assert miss2 is None
+    print("  OK Failures not cached")
+
+    # Stats
+    cache.get("echo", {"text": "hello"})  # hit
+    cache.get("echo", {"text": "miss"})   # miss
+    stats = cache.get_stats()
+    assert stats["hits"] >= 1
+    assert stats["misses"] >= 1
+    print(f"  OK Stats: hits={stats['hits']}, misses={stats['misses']}")
+
+    # LRU eviction
+    for i in range(10):
+        cache.put("tool", {"n": str(i)}, ToolResult.ok(f"result {i}"))
+    assert cache.size <= 5
+    stats2 = cache.get_stats()
+    assert stats2["evictions"] > 0
+    print(f"  OK LRU eviction: size={cache.size}, evictions={stats2['evictions']}")
+
+    # Disabled cache
+    cache2 = ToolResultCache(enabled=False)
+    cache2.put("x", {"y": "z"}, ToolResult.ok("test"))
+    assert cache2.get("x", {"y": "z"}) is None
+    print("  OK Disabled cache")
+
+    # Clear
+    cache.put("a", {"b": "c"}, ToolResult.ok("d"))
+    cleared = cache.clear()
+    assert cleared > 0
+    assert cache.size == 0
+    print("  OK Clear")
+
+    print()
+
+async def test_parallel_execution():
+    print("=" * 60)
+    print("5. Testing Parallel Execution in Loop")
+    print("=" * 60)
+    from src.config.settings import load_yaml_config, LLMConfig, AgentConfig, SecurityConfig
+    from src.core.loop import AgentLoop
+    from src.llm.router import LLMRouter
+    from src.llm.models import ToolCall
+    from src.security.permission import PermissionManager
+    from src.security.audit import AuditLogger
+    from src.tools.base import BaseTool, ToolResult, DangerLevel, ToolParameter
+    from src.tools.registry import ToolRegistry
+    import time
+
+    config_yaml = load_yaml_config(Path(__file__).parent.parent / "config.example.yaml")
+    llm_config = LLMConfig.model_validate(config_yaml["llm"])
+    agent_config = AgentConfig.model_validate(config_yaml.get("agent", {}))
+    security_config = SecurityConfig()
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        router = LLMRouter(llm_config)
+        registry = ToolRegistry()
+
+        class SlowSafeTool(BaseTool):
+            name = "slow_safe"
+            description = "Slow safe tool"
+            danger_level = DangerLevel.SAFE
+            category = "test"
+            parameters = [ToolParameter(name="val", type="string", description="Val", required=True)]
+            async def execute(self, **kwargs):
+                await asyncio.sleep(0.2)  # Simulate slow IO
+                return ToolResult.ok(f"slow_{kwargs['val']}")
+
+        class FastConfirmTool(BaseTool):
+            name = "fast_confirm"
+            description = "Fast confirm tool"
+            danger_level = DangerLevel.CONFIRM
+            category = "test"
+            parameters = [ToolParameter(name="val", type="string", description="Val", required=True)]
+            async def execute(self, **kwargs):
+                return ToolResult.ok(f"confirm_{kwargs['val']}")
+
+        registry.register_many([SlowSafeTool(), FastConfirmTool()])
+        pm = PermissionManager(config=security_config, auto_confirm=True)
+        audit = AuditLogger(enabled=False)
+        loop = AgentLoop(llm=router, agent_config=agent_config, system_prompt="Test",
+                         tool_registry=registry, permission_manager=pm, audit_logger=audit)
+
+        # 3 safe tools in parallel should be faster than sequential
+        calls = [
+            ToolCall(id="s1", name="slow_safe", arguments='{"val": "a"}'),
+            ToolCall(id="s2", name="slow_safe", arguments='{"val": "b"}'),
+            ToolCall(id="s3", name="slow_safe", arguments='{"val": "c"}'),
+        ]
+        start = time.monotonic()
+        results = await loop._execute_tool_calls(calls)
+        elapsed = time.monotonic() - start
+
+        assert len(results) == 3
+        assert all(r.success for r in results)
+        assert "slow_a" in results[0].content
+        assert "slow_b" in results[1].content
+        assert "slow_c" in results[2].content
+        # Parallel: ~0.2s (not ~0.6s)
+        assert elapsed < 0.8, f"Parallel execution took too long: {elapsed:.2f}s"
+        print(f"  OK 3 safe tools parallel in {elapsed:.2f}s (< 0.8s)")
+
+        # Mixed: safe parallel + confirm sequential
+        calls2 = [
+            ToolCall(id="s1", name="slow_safe", arguments='{"val": "x"}'),
+            ToolCall(id="c1", name="fast_confirm", arguments='{"val": "y"}'),
+            ToolCall(id="s2", name="slow_safe", arguments='{"val": "z"}'),
+        ]
+        results2 = await loop._execute_tool_calls(calls2)
+        assert len(results2) == 3
+        assert all(r.success for r in results2)
+        assert results2[0].content == "slow_x"  # Order preserved
+        assert results2[1].content == "confirm_y"
+        assert results2[2].content == "slow_z"
+        print("  OK Mixed safe+confirm execution, order preserved")
+
+    print()
+
+async def test_cache_in_loop():
+    print("=" * 60)
+    print("6. Testing Cache Integration in Loop")
+    print("=" * 60)
+    from src.config.settings import load_yaml_config, LLMConfig, AgentConfig, SecurityConfig
+    from src.core.loop import AgentLoop
+    from src.llm.router import LLMRouter
+    from src.llm.models import ToolCall
+    from src.security.permission import PermissionManager
+    from src.tools.base import BaseTool, ToolResult, DangerLevel, ToolParameter
+    from src.tools.registry import ToolRegistry
+
+    config_yaml = load_yaml_config(Path(__file__).parent.parent / "config.example.yaml")
+    llm_config = LLMConfig.model_validate(config_yaml["llm"])
+    agent_config = AgentConfig.model_validate(config_yaml.get("agent", {}))
+    security_config = SecurityConfig()
+    router = LLMRouter(llm_config)
+
+    call_count = 0
+    class CountingTool(BaseTool):
+        name = "counting"
+        description = "Counts calls"
+        danger_level = DangerLevel.SAFE
+        category = "test"
+        parameters = [ToolParameter(name="x", type="string", description="X", required=True)]
+        async def execute(self, **kwargs):
+            nonlocal call_count
+            call_count += 1
+            return ToolResult.ok(f"called_{call_count}")
+
+    registry = ToolRegistry()
+    registry.register(CountingTool())
+    pm = PermissionManager(config=security_config)
+    loop = AgentLoop(llm=router, agent_config=agent_config, system_prompt="Test",
+                     tool_registry=registry, permission_manager=pm, audit_logger=None)
+
+    # First call - executes
+    calls1 = [ToolCall(id="c1", name="counting", arguments='{"x": "1"}')]
+    r1 = await loop._execute_tool_calls(calls1)
+    assert r1[0].success and "called_1" in r1[0].content
+    assert call_count == 1
+    print("  OK First call executes")
+
+    # Second call with same args - cached
+    calls2 = [ToolCall(id="c2", name="counting", arguments='{"x": "1"}')]
+    r2 = await loop._execute_tool_calls(calls2)
+    assert r2[0].success and "called_1" in r2[0].content
+    assert call_count == 1  # No new execution
+    print("  OK Second call returns cached result (no new execution)")
+
+    # Different args - new execution
+    calls3 = [ToolCall(id="c3", name="counting", arguments='{"x": "2"}')]
+    r3 = await loop._execute_tool_calls(calls3)
+    assert r3[0].success and "called_2" in r3[0].content
+    assert call_count == 2
+    print("  OK Different args bypass cache")
+
+    # Cache stats
+    stats = loop._cache.get_stats()
+    assert stats["hits"] == 1
+    assert stats["misses"] == 2
+    print(f"  OK Cache stats: hits={stats['hits']}, misses={stats['misses']}")
+
+    print()
+
+async def test_full_agent_p3():
+    print("=" * 60)
+    print("7. Testing Full Agent with P3 Tools")
+    print("=" * 60)
+    from src.config.settings import load_yaml_config, Settings
+    from src.core.agent import Agent
+
+    config_yaml = load_yaml_config(Path(__file__).parent.parent / "config.example.yaml")
+    settings = Settings.model_validate(config_yaml)
+    agent = Agent(settings)
+
+    names = sorted(agent.tools.tool_names)
+    print(f"  OK Agent: {agent}")
+    print(f"  OK Tools ({len(names)}): {names}")
+
+    # Check new tools exist
+    assert "grep" in names
+    assert "glob" in names
+    assert "multi_edit" in names
+    print("  OK New tools registered: grep, glob, multi_edit")
+
+    assert agent.loop._cache is not None
+    print(f"  OK Cache initialized: {agent.loop._cache}")
+
+    print()
+
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
+
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
-
-passed = 0
-failed = 0
-errors = []
-
-
-def run_test(name, func):
-    """运行单个测试并记录结果。"""
-    global passed, failed, errors
-    try:
-        func()
-        passed += 1
-        print(f"  ✅ {name}")
-    except Exception as e:
-        failed += 1
-        errors.append((name, str(e)))
-        print(f"  ❌ {name}: {e}")
-
-
-def run_async_test(name, func):
-    """运行异步测试。"""
-    global passed, failed, errors
-    try:
-        asyncio.run(func())
-        passed += 1
-        print(f"  ✅ {name}")
-    except Exception as e:
-        failed += 1
-        errors.append((name, str(e)))
-        print(f"  ❌ {name}: {e}")
-
-
-# ============================================================
-# Test 1: 行号级编辑工具 (line_edit_tool.py)
-# ============================================================
 
 async def test_line_edit_replace():
     """测试行号替换操作。"""
@@ -81,7 +433,6 @@ async def test_line_edit_replace():
     finally:
         os.unlink(tmp_path)
 
-
 async def test_line_edit_insert():
     """测试行号插入操作。"""
     from src.tools.builtin.line_edit_tool import LineEditTool
@@ -102,7 +453,6 @@ async def test_line_edit_insert():
     finally:
         os.unlink(tmp_path)
 
-
 async def test_line_edit_delete():
     """测试行号删除操作。"""
     from src.tools.builtin.line_edit_tool import LineEditTool
@@ -122,7 +472,6 @@ async def test_line_edit_delete():
         assert content == "aaa\nccc\n"
     finally:
         os.unlink(tmp_path)
-
 
 async def test_line_edit_validation():
     """测试行号越界检查。"""
@@ -146,7 +495,6 @@ async def test_line_edit_validation():
         assert "小于" in result.error
     finally:
         os.unlink(tmp_path)
-
 
 async def test_line_read():
     """测试按行号读取。"""
@@ -176,11 +524,6 @@ async def test_line_read():
     finally:
         os.unlink(tmp_path)
 
-
-# ============================================================
-# Test 2: Diff 预览工具 (diff_tool.py)
-# ============================================================
-
 def test_diff_text():
     """测试文本比较。"""
     from src.tools.builtin.diff_tool import DiffTool
@@ -200,7 +543,6 @@ def test_diff_text():
         assert "统计" in result.content
 
     asyncio.run(_run())
-
 
 def test_diff_file():
     """测试文件比较。"""
@@ -232,7 +574,6 @@ def test_diff_file():
         os.unlink(path1)
         os.unlink(path2)
 
-
 def test_diff_side_by_side():
     """测试并排对比格式。"""
     from src.tools.builtin.diff_tool import DiffTool
@@ -250,7 +591,6 @@ def test_diff_side_by_side():
         assert "│" in result.content  # 并排格式使用 │ 分隔
 
     asyncio.run(_run())
-
 
 def test_snapshot_save_and_restore():
     """测试快照保存和恢复。"""
@@ -295,7 +635,6 @@ def test_snapshot_save_and_restore():
     finally:
         os.unlink(tmp_path)
 
-
 def test_snapshot_list():
     """测试快照列表。"""
     from src.tools.builtin.diff_tool import SnapshotTool
@@ -326,11 +665,6 @@ def test_snapshot_list():
     finally:
         os.unlink(tmp_path)
 
-
-# ============================================================
-# Test 3: Git 集成工具 (git_tool.py)
-# ============================================================
-
 def test_git_tools_import():
     """测试 Git 工具可以正确导入。"""
     from src.tools.builtin.git_tool import (
@@ -346,7 +680,6 @@ def test_git_tools_import():
     assert GIT_TOOLS[4].name == "git_branch"
     assert GIT_TOOLS[5].name == "git_show"
     assert GIT_TOOLS[6].name == "git_blame"
-
 
 def test_git_diff_tool_properties():
     """测试 GitDiffTool 属性。"""
@@ -365,7 +698,6 @@ def test_git_diff_tool_properties():
     assert "file_path" in param_names
     assert "commit_range" in param_names
 
-
 def test_git_commit_tool_properties():
     """测试 GitCommitTool 属性。"""
     from src.tools.builtin.git_tool import GitCommitTool
@@ -380,7 +712,6 @@ def test_git_commit_tool_properties():
     assert "files" in param_names
     assert "amend" in param_names
 
-
 def test_git_log_tool_properties():
     """测试 GitLogTool 属性。"""
     from src.tools.builtin.git_tool import GitLogTool
@@ -392,7 +723,6 @@ def test_git_log_tool_properties():
     assert "author" in param_names
     assert "since" in param_names
 
-
 def test_git_status_tool_properties():
     """测试 GitStatusTool 属性。"""
     from src.tools.builtin.git_tool import GitStatusTool
@@ -400,7 +730,6 @@ def test_git_status_tool_properties():
     tool = GitStatusTool()
     assert tool.name == "git_status"
     assert len(tool.parameters) == 2
-
 
 def test_git_branch_tool_properties():
     """测试 GitBranchTool 属性。"""
@@ -410,7 +739,6 @@ def test_git_branch_tool_properties():
     tool = GitBranchTool()
     assert tool.name == "git_branch"
     assert tool.danger_level == DangerLevel.CONFIRM
-
 
 def test_git_operations():
     """测试 Git 操作（在临时仓库中）。"""
@@ -461,7 +789,6 @@ def test_git_operations():
 
         asyncio.run(_run())
 
-
 def test_git_show_tool():
     """测试 git_show 工具。"""
     from src.tools.builtin.git_tool import GitShowTool
@@ -487,7 +814,6 @@ def test_git_show_tool():
 
         asyncio.run(_run())
 
-
 def test_git_blame_tool():
     """测试 git_blame 工具。"""
     from src.tools.builtin.git_tool import GitBlameTool
@@ -511,7 +837,6 @@ def test_git_blame_tool():
             assert result.success
 
         asyncio.run(_run())
-
 
 def test_git_branch_tool():
     """测试 git_branch 工具。"""
@@ -544,11 +869,6 @@ def test_git_branch_tool():
             assert "feature-test" in result.content
 
         asyncio.run(_run())
-
-
-# ============================================================
-# Test 4: 语法感知编辑 (ast_tool.py)
-# ============================================================
 
 def test_code_structure():
     """测试代码结构分析。"""
@@ -603,7 +923,6 @@ def my_function(x: int, y: str = "default") -> str:
     finally:
         os.unlink(tmp_path)
 
-
 def test_symbol_find():
     """测试符号查找。"""
     from src.tools.builtin.ast_tool import SymbolFindTool
@@ -638,7 +957,6 @@ def world():
     finally:
         os.unlink(tmp_path)
 
-
 def test_symbol_edit():
     """测试符号替换。"""
     from src.tools.builtin.ast_tool import SymbolEditTool
@@ -669,7 +987,6 @@ def test_symbol_edit():
         asyncio.run(_run())
     finally:
         os.unlink(tmp_path)
-
 
 def test_import_analyze():
     """测试导入分析。"""
@@ -702,7 +1019,6 @@ def my_func():
     finally:
         os.unlink(tmp_path)
 
-
 def test_ast_tool_properties():
     """测试 AST 工具属性。"""
     from src.tools.builtin.ast_tool import (
@@ -734,7 +1050,6 @@ def test_ast_tool_properties():
     assert t.name == "import_analyze"
     assert t.danger_level == DangerLevel.SAFE
 
-
 def test_code_structure_non_python():
     """测试非 Python 文件的处理。"""
     from src.tools.builtin.ast_tool import CodeStructureTool
@@ -754,11 +1069,6 @@ def test_code_structure_non_python():
         asyncio.run(_run())
     finally:
         os.unlink(tmp_path)
-
-
-# ============================================================
-# Test 5: Agent 集成
-# ============================================================
 
 def test_agent_tool_registration():
     """测试所有 P11 工具已注册到 Agent。"""
@@ -782,7 +1092,6 @@ def test_agent_tool_registration():
     for name in expected_names:
         assert name in p11_names, f"缺少工具: {name}"
 
-
 def test_diff_tool_stats():
     """测试 diff 统计功能。"""
     from src.tools.builtin.diff_tool import DiffTool
@@ -795,7 +1104,6 @@ def test_diff_tool_stats():
     assert "统计" in stats
     assert "+" in stats or "-" in stats
 
-
 def test_get_zclaw_dir():
     """测试 _get_zclaw_dir 函数。"""
     from src.config.settings import _get_zclaw_dir
@@ -803,70 +1111,3 @@ def test_get_zclaw_dir():
     d = _get_zclaw_dir()
     assert d.exists()
     assert d.name == ".Zclaw"
-
-
-# ============================================================
-# 运行所有测试
-# ============================================================
-
-def main():
-    print("=" * 60)
-    print("P11 验证测试 - 高级编辑能力")
-    print("=" * 60)
-
-    print("\n📝 1. 行号级编辑工具 (line_edit_tool.py)")
-    run_async_test("行号替换 (replace)", test_line_edit_replace)
-    run_async_test("行号插入 (insert)", test_line_edit_insert)
-    run_async_test("行号删除 (delete)", test_line_edit_delete)
-    run_async_test("行号越界检查", test_line_edit_validation)
-    run_async_test("按行号读取 (line_read)", test_line_read)
-
-    print("\n🔍 2. Diff 预览工具 (diff_tool.py)")
-    run_test("文本比较", test_diff_text)
-    run_test("文件比较", test_diff_file)
-    run_test("并排对比格式", test_diff_side_by_side)
-    run_test("快照保存和恢复", test_snapshot_save_and_restore)
-    run_test("快照列表", test_snapshot_list)
-
-    print("\n🐙 3. Git 集成工具 (git_tool.py)")
-    run_test("Git 工具导入", test_git_tools_import)
-    run_test("GitDiffTool 属性", test_git_diff_tool_properties)
-    run_test("GitCommitTool 属性", test_git_commit_tool_properties)
-    run_test("GitLogTool 属性", test_git_log_tool_properties)
-    run_test("GitStatusTool 属性", test_git_status_tool_properties)
-    run_test("GitBranchTool 属性", test_git_branch_tool_properties)
-    run_test("Git 操作 (status/commit/log/diff)", test_git_operations)
-    run_test("git_show", test_git_show_tool)
-    run_test("git_blame", test_git_blame_tool)
-    run_test("git_branch", test_git_branch_tool)
-
-    print("\n🧠 4. 语法感知编辑 (ast_tool.py)")
-    run_test("代码结构分析", test_code_structure)
-    run_test("符号查找", test_symbol_find)
-    run_test("符号替换", test_symbol_edit)
-    run_test("导入分析", test_import_analyze)
-    run_test("AST 工具属性", test_ast_tool_properties)
-    run_test("非 Python 文件处理", test_code_structure_non_python)
-
-    print("\n🔗 5. Agent 集成")
-    run_test("P11 工具注册", test_agent_tool_registration)
-    run_test("Diff 统计功能", test_diff_tool_stats)
-    run_test("_get_zclaw_dir 函数", test_get_zclaw_dir)
-
-    # 汇总
-    print("\n" + "=" * 60)
-    total = passed + failed
-    print(f"结果: {passed}/{total} 通过, {failed} 失败")
-    print("=" * 60)
-
-    if errors:
-        print("\n失败详情:")
-        for name, err in errors:
-            print(f"  - {name}: {err}")
-
-    return failed == 0
-
-
-if __name__ == "__main__":
-    success = main()
-    sys.exit(0 if success else 1)

@@ -1,6 +1,4 @@
-"""
-P2 End-to-End Validation - Security permissions, input validation, audit logging.
-"""
+"""Permission, validation, sanitizer, and audit tests."""
 
 import asyncio
 import json
@@ -8,8 +6,6 @@ import os
 import sys
 import tempfile
 from pathlib import Path
-
-sys.path.insert(0, str(Path(__file__).parent.parent))
 
 
 async def test_permission_manager():
@@ -65,7 +61,6 @@ async def test_permission_manager():
     print(f"  OK Stats: {stats}")
     print()
 
-
 async def test_input_validator():
     print("=" * 60)
     print("2. Testing Input Validator")
@@ -95,16 +90,15 @@ async def test_input_validator():
     print("  OK File size exceeded")
     print()
 
-
 async def test_output_sanitizer():
     print("=" * 60)
     print("3. Testing Output Sanitizer")
     print("=" * 60)
     from src.security.validator import OutputSanitizer
     s = OutputSanitizer()
-    text = "api_key = sk-1234567890abcdefghijklmnop"
+    text = "api_key = example-secret-token-1234567890"
     result = s.redact_sensitive(text)
-    assert "sk-1234" not in result and "***REDACTED***" in result
+    assert "example-secret" not in result and "***REDACTED***" in result
     print("  OK API key redacted")
     text2 = "password = supersecret12345678901"
     result2 = s.redact_sensitive(text2)
@@ -118,12 +112,11 @@ async def test_output_sanitizer():
     result4 = s.truncate(text4, 1000)
     assert len(result4) < 1100 and "截断" in result4
     print("  OK Long text truncated")
-    text5 = "normal text with \x00control chars and api_key=sk-abcdefghijklmnopqrstuvwxyz"
+    text5 = "normal text with \x00control chars and api_key=example-secret-token-abcdef"
     result5 = s.sanitize(text5)
-    assert "\x00" not in result5 and "sk-abcdef" not in result5
+    assert "\x00" not in result5 and "example-secret" not in result5
     print("  OK Full sanitize pipeline")
     print()
-
 
 async def test_audit_logger():
     print("=" * 60)
@@ -144,7 +137,6 @@ async def test_audit_logger():
         assert audit.log_file.exists()
         print(f"  OK Log file exists: {audit.log_file.name}")
     print()
-
 
 async def test_integration_with_loop():
     print("=" * 60)
@@ -200,7 +192,6 @@ async def test_integration_with_loop():
         print(f"  OK Audit log: {audit_stats}")
     print()
 
-
 async def test_full_agent_init():
     print("=" * 60)
     print("6. Testing Full Agent with Security")
@@ -221,32 +212,3 @@ async def test_full_agent_init():
     assert agent.session_id != agent2.session_id
     print("  OK Different sessions have different IDs")
     print()
-
-
-async def main():
-    print()
-    print("=" * 60)
-    print("        Zclaw P2 - Security Validation")
-    print("=" * 60)
-    print()
-    tests = [test_permission_manager, test_input_validator, test_output_sanitizer, test_audit_logger, test_integration_with_loop, test_full_agent_init]
-    passed = 0
-    failed = 0
-    for test in tests:
-        try:
-            await test()
-            passed += 1
-        except Exception as e:
-            print(f"  FAILED: {e}")
-            import traceback
-            traceback.print_exc()
-            failed += 1
-    print("=" * 60)
-    print(f"Results: {passed} passed, {failed} failed")
-    print("=" * 60)
-    if failed > 0:
-        sys.exit(1)
-
-
-if __name__ == "__main__":
-    asyncio.run(main())
