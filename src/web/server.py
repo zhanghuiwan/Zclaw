@@ -32,7 +32,7 @@ def create_app(agent=None, settings=None) -> FastAPI:
     app = FastAPI(
         title="Zclaw Web UI",
         description="Claude Code 风格 AI 编程助手 - Web 界面",
-        version="0.1.0",
+        version="0.6.1",
         docs_url="/api/docs",
         redoc_url="/api/redoc",
     )

@@ -45,7 +45,7 @@ def run_async_test(name, func):
     """运行异步测试。"""
     global passed, failed, errors
     try:
-        asyncio.get_event_loop().run_until_complete(func())
+        asyncio.run(func())
         passed += 1
         print(f"  ✅ {name}")
     except Exception as e:
@@ -199,7 +199,7 @@ def test_diff_text():
         assert "+python" in result.content or "-world" in result.content
         assert "统计" in result.content
 
-    asyncio.get_event_loop().run_until_complete(_run())
+    asyncio.run(_run())
 
 
 def test_diff_file():
@@ -227,7 +227,7 @@ def test_diff_file():
             assert result.success
             assert "bbb" in result.content or "xxx" in result.content
 
-        asyncio.get_event_loop().run_until_complete(_run())
+        asyncio.run(_run())
     finally:
         os.unlink(path1)
         os.unlink(path2)
@@ -249,7 +249,7 @@ def test_diff_side_by_side():
         assert result.success
         assert "│" in result.content  # 并排格式使用 │ 分隔
 
-    asyncio.get_event_loop().run_until_complete(_run())
+    asyncio.run(_run())
 
 
 def test_snapshot_save_and_restore():
@@ -291,7 +291,7 @@ def test_snapshot_save_and_restore():
             delete_result = await tool.execute(action="delete", path=tmp_path, snapshot_id=snapshot_id)
             assert delete_result.success
 
-        asyncio.get_event_loop().run_until_complete(_run())
+        asyncio.run(_run())
     finally:
         os.unlink(tmp_path)
 
@@ -322,7 +322,7 @@ def test_snapshot_list():
             assert result.success
             assert "2" in result.content
 
-        asyncio.get_event_loop().run_until_complete(_run())
+        asyncio.run(_run())
     finally:
         os.unlink(tmp_path)
 
@@ -459,7 +459,7 @@ def test_git_operations():
             assert result.success
             assert "没有差异" in result.content
 
-        asyncio.get_event_loop().run_until_complete(_run())
+        asyncio.run(_run())
 
 
 def test_git_show_tool():
@@ -485,7 +485,7 @@ def test_git_show_tool():
             assert result.success
             assert "test commit" in result.content
 
-        asyncio.get_event_loop().run_until_complete(_run())
+        asyncio.run(_run())
 
 
 def test_git_blame_tool():
@@ -510,7 +510,7 @@ def test_git_blame_tool():
             result = await tool.execute(file_path="blame_test.py", repo_path=tmpdir)
             assert result.success
 
-        asyncio.get_event_loop().run_until_complete(_run())
+        asyncio.run(_run())
 
 
 def test_git_branch_tool():
@@ -543,7 +543,7 @@ def test_git_branch_tool():
             assert result.success
             assert "feature-test" in result.content
 
-        asyncio.get_event_loop().run_until_complete(_run())
+        asyncio.run(_run())
 
 
 # ============================================================
@@ -599,7 +599,7 @@ def my_function(x: int, y: str = "default") -> str:
             assert result.success
             assert "A class." in result.content or "A function." in result.content
 
-        asyncio.get_event_loop().run_until_complete(_run())
+        asyncio.run(_run())
     finally:
         os.unlink(tmp_path)
 
@@ -634,7 +634,7 @@ def world():
             assert not result.success
             assert "未找到" in result.error
 
-        asyncio.get_event_loop().run_until_complete(_run())
+        asyncio.run(_run())
     finally:
         os.unlink(tmp_path)
 
@@ -666,7 +666,7 @@ def test_symbol_edit():
             assert "old_func" not in content
             assert "def other_func" in content  # 其他函数不受影响
 
-        asyncio.get_event_loop().run_until_complete(_run())
+        asyncio.run(_run())
     finally:
         os.unlink(tmp_path)
 
@@ -698,7 +698,7 @@ def my_func():
             assert "json" in result.content
             assert "统计" in result.content
 
-        asyncio.get_event_loop().run_until_complete(_run())
+        asyncio.run(_run())
     finally:
         os.unlink(tmp_path)
 
@@ -751,7 +751,7 @@ def test_code_structure_non_python():
             assert not result.success
             assert "Python" in result.error
 
-        asyncio.get_event_loop().run_until_complete(_run())
+        asyncio.run(_run())
     finally:
         os.unlink(tmp_path)
 

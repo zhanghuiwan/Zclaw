@@ -5,7 +5,7 @@
 **结合 Claude Code 与 OpenClaw 的 AI 编程助手**
 
 [![Python](https://img.shields.io/badge/Python-3.11+-blue.svg)](https://python.org)
-[![Version](https://img.shields.io/badge/Version-0.4.0-green.svg)]()
+[![Version](https://img.shields.io/badge/Version-0.6.1-green.svg)]()
 [![License](https://img.shields.io/badge/License-MIT-orange.svg)]()
 
 一个用 Python 编写的 AI 编程助手，将大语言模型（LLM）与本地文件系统、Shell 环境深度结合，
@@ -156,14 +156,23 @@ ZCLAW_API_KEY=sk-xxxxxxx        # 你的 API Key
 ZCLAW_BASE_URL=https://dashscope.aliyuncs.com/compatible-mode/v1
 ```
 
+也可以不创建 `.env` 文件，直接通过环境变量启动：
+
+```bash
+export ZCLAW_API_KEY=sk-xxxxxxx
+Zclaw
+```
+
 ### 3. 运行
 
 ```bash
-# 交互模式
+# 交互模式（两者等价）
 python main.py
+Zclaw
 
 # 非交互模式（单次提问）
 python main.py -p "列出当前目录的文件"
+Zclaw -p "列出当前目录的文件"
 
 # 启动 Web UI
 python -m src.web.server
@@ -233,24 +242,17 @@ Zclaw 内置 **28 个工具**，分为 6 大类：
 
 ## ⌨️ CLI 命令
 
+默认入口 `Zclaw` 与 `python main.py` 共用同一套简易对话实现，支持：
+
 | 命令 | 功能 |
 |------|------|
 | `/help` | 显示帮助信息 |
 | `/clear` | 清空对话历史 |
 | `/undo` | 撤销上一轮对话 |
-| `/compact` | 手动压缩上下文 |
-| `/usage` | 显示 token 使用统计 |
-| `/tools` | 列出已注册工具 |
-| `/provider [name]` | 查看/切换 LLM Provider |
-| `/model [name]` | 查看/切换模型 |
-| `/info` | 显示完整配置信息 |
-| `/memory` | 查看/搜索/删除记忆 |
-| `/session save\|load\|delete\|list` | 会话管理 |
-| `/plugin [reload\|list]` | 插件管理 |
-| `/cost` | Token 用量和费用统计 |
-| `/plan [clear]` | 查看/清除当前计划 |
-| `/mcp list\|connect\|disconnect` | MCP 服务器管理 |
+| `/info` | 显示当前配置 |
 | `/quit` `/exit` | 退出 |
+
+完整 REPL 入口仍保留，可通过 `python -m src.cli.app` 启动。
 
 ## ⚙️ 配置说明
 
@@ -357,8 +359,8 @@ Skills 从以下目录加载，与 Claude Code / OpenClaw 兼容：
 
 | 类型 | 目录 | 说明 |
 |------|------|------|
-| 全局 | `~/.zclaw/skills/` | 所有项目共享的 Skills |
-| 项目 | `project_root/skills/` | 仅当前项目可用的 Skills |
+| 全局 | `~/.agents/skills/` | 所有项目共享的 Skills |
+| 项目 | `project_root/.agents/skills/` | 仅当前项目可用的 Skills |
 
 每个 Skill 放在独立目录中，包含 `SKILL.md` 定义文件。
 

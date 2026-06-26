@@ -69,6 +69,33 @@ def get_agent():
     return _agent
 
 
+def _danger_level_value(level: Any) -> str:
+    """将 DangerLevel enum 或字符串统一为字符串值。"""
+    return level.value if hasattr(level, "value") else str(level)
+
+
+async def _request_web_permission(conn_id: str, request) -> bool:
+    """通过 WebSocket 请求工具权限确认。"""
+    danger_level = _danger_level_value(request.danger_level)
+
+    if danger_level == "safe":
+        return True
+
+    request_id = uuid.uuid4().hex[:8]
+    try:
+        args_for_client = dict(request.arguments)
+    except Exception:
+        args_for_client = str(request.arguments)
+
+    return await ws_manager.request_permission(
+        conn_id=conn_id,
+        request_id=request_id,
+        tool_name=request.tool_name,
+        arguments=args_for_client,
+        danger_level=danger_level,
+    )
+
+
 # ──────────────────────────────────────────────
 # WebSocket 端点
 # ──────────────────────────────────────────────
@@ -93,33 +120,7 @@ async def websocket_endpoint(websocket: WebSocket):
     # 设置权限回调
     async def web_permission_callback(request):
         """Web 模式的权限回调 - 通过 WebSocket 向用户请求确认。"""
-        from src.security.permission import DangerLevel
-
-        if request.danger_level == DangerLevel.SAFE:
-            return True, "自动批准（安全操作）"
-
-        request_id = uuid.uuid4().hex[:8]
-
-        # 尝试获取 arguments 的可序列化版本
-        try:
-            args_for_client = dict(request.arguments)
-        except Exception:
-            args_for_client = str(request.arguments)
-
-        # 对于危险操作，默认拒绝
-        if request.danger_level == DangerLevel.DANGEROUS:
-            # 但仍询问用户
-            pass
-
-        allowed = await ws_manager.request_permission(
-            conn_id=conn_id,
-            request_id=request_id,
-            tool_name=request.tool_name,
-            arguments=args_for_client,
-            danger_level=request.danger_level.value,
-        )
-        reason = "用户批准" if allowed else "用户拒绝"
-        return allowed, reason
+        return await _request_web_permission(conn_id, request)
 
     if _agent and _agent.permission_manager:
         _agent.permission_manager.set_confirm_callback(web_permission_callback)
@@ -205,6 +206,7 @@ async def _handle_chat(
     """
     agent = get_agent()
     round_usage = {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}
+    done_sent = False
 
     try:
         async for event in agent.chat_stream(message):
@@ -257,6 +259,7 @@ async def _handle_chat(
                     "type": "done",
                     "data": None,
                 })
+                done_sent = True
 
             elif event.type == StreamEventType.ERROR:
                 await ws_manager.send_json(conn_id, {
@@ -271,7 +274,7 @@ async def _handle_chat(
             "data": {"message": str(e)},
         })
     finally:
-        if not cancel_event.is_set():
+        if not cancel_event.is_set() and not done_sent:
             await ws_manager.send_json(conn_id, {
                 "type": "done",
                 "data": None,
@@ -311,7 +314,7 @@ async def _handle_command(conn_id: str, data: dict[str, Any]) -> None:
     elif command == "compact":
         if agent.context_manager:
             msgs = agent.loop.messages
-            agent.context_manager.prepare_messages(msgs, force_compress=True)
+            agent.loop._messages = agent.context_manager.prepare_messages(msgs, force_compress=True)
             await ws_manager.send_json(conn_id, {
                 "type": "info",
                 "data": {"message": "上下文已压缩。"},
@@ -562,7 +565,8 @@ async def load_session(session_id: str):
             raise HTTPException(status_code=404, detail=f"会话不存在: {session_id}")
         # 将历史消息恢复到 Agent Loop
         agent.loop.clear_history()
-        for msg in messages:
+        from src.cli.session import deserialize_messages
+        for msg in deserialize_messages(messages):
             agent.loop.add_message(msg)
         return SuccessResponse(message=f"已加载会话: {session_id}")
     except HTTPException:

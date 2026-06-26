@@ -181,7 +181,7 @@ class LLMExtractor(BaseExtractor):
         try:
             items = json.loads(json_match.group())
         except json.JSONDecodeError:
-            logger.warning("记忆提取返回了无效的 JSON")
+            logger.debug("记忆提取返回了无效的 JSON: %s", text[:200])
             return []
 
         results = []

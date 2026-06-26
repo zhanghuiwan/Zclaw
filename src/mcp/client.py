@@ -79,7 +79,7 @@ class MCPClient:
                 "capabilities": {},
                 "clientInfo": {
                     "name": "Zclaw",
-                    "version": "0.3.0",
+                    "version": "0.6.1",
                 },
             })
 

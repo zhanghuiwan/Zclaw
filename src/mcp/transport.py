@@ -266,7 +266,7 @@ class SSETransport(BaseTransport):
         result = await self.send_request("initialize", {
             "protocolVersion": "2024-11-05",
             "capabilities": {},
-            "clientInfo": {"name": "Zclaw", "version": "0.3.0"},
+                "clientInfo": {"name": "Zclaw", "version": "0.6.1"},
         })
 
         # 发送 initialized 通知
@@ -370,7 +370,7 @@ class MockTransport(BaseTransport):
             return {
                 "protocolVersion": "2024-11-05",
                 "capabilities": {"tools": {"listChanged": False}},
-                "serverInfo": {"name": "mock-mcp-server", "version": "0.1.0"},
+                "serverInfo": {"name": "mock-mcp-server", "version": "0.6.1"},
             }
         elif method == "tools/list":
             return {"tools": self._tools}

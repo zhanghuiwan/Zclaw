@@ -141,21 +141,24 @@ class AgentLoop:
             ))
         return definitions
 
+    def _get_tool_danger_level(self, tool_name: str, arguments: dict[str, Any]) -> str:
+        if self._tools and self._tools.has(tool_name):
+            return self._tools.get(tool_name).get_danger_level(arguments).value
+        return "safe"
+
     async def _check_permission(
         self, tool_name: str, arguments: dict[str, Any]
-    ) -> tuple[bool, str]:
+    ) -> tuple[bool, str, str]:
         if not self._permissions:
-            return True, "未配置权限管理器"
-        danger_level = "safe"
-        if self._tools and self._tools.has(tool_name):
-            danger_level = self._tools.get(tool_name).danger_level.value
+            return True, "未配置权限管理器", self._get_tool_danger_level(tool_name, arguments)
+        danger_level = self._get_tool_danger_level(tool_name, arguments)
         request = PermissionRequest(
             tool_name=tool_name,
             arguments=arguments,
             danger_level=danger_level,
         )
         response = await self._permissions.check(request)
-        return response.allowed, response.reason
+        return response.allowed, response.reason, danger_level
 
     async def _execute_single_tool(self, tc: ToolCall) -> ToolCallResult:
         """执行单个工具调用（含权限检查、缓存、审计）。"""
@@ -170,7 +173,7 @@ class AgentLoop:
 
         import time
         start_ms = time.monotonic()
-        allowed, reason = await self._check_permission(tc.name, args)
+        allowed, reason, danger_level = await self._check_permission(tc.name, args)
         duration_ms = int((time.monotonic() - start_ms) * 1000)
 
         if not allowed:
@@ -182,9 +185,7 @@ class AgentLoop:
             )
 
         # P3: 缓存检查（只对 safe 工具）
-        is_safe = False
-        if self._tools and self._tools.has(tc.name):
-            is_safe = self._tools.get(tc.name).danger_level.value == "safe"
+        is_safe = danger_level == "safe"
 
         if is_safe:
             cached = self._cache.get(tc.name, args)
@@ -204,7 +205,6 @@ class AgentLoop:
         if is_safe and tool_result.success:
             self._cache.put(tc.name, args, tool_result)
 
-        danger_level = "safe" if is_safe else "confirm"
         self._log_audit(
             tc.name, args, danger_level, "allow", True,
             tool_result.success,
@@ -234,9 +234,11 @@ class AgentLoop:
         safe_calls = []
         sequential_calls = []
         for tc in tool_calls:
-            is_safe = False
-            if self._tools and self._tools.has(tc.name):
-                is_safe = self._tools.get(tc.name).danger_level.value == "safe"
+            try:
+                args = json.loads(tc.arguments) if isinstance(tc.arguments, str) else tc.arguments
+            except json.JSONDecodeError:
+                args = {}
+            is_safe = self._get_tool_danger_level(tc.name, args) == "safe"
             if is_safe:
                 safe_calls.append(tc)
             else:

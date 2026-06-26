@@ -98,8 +98,8 @@ class SecurityConfig(BaseModel):
 class SkillsConfig(BaseModel):
     """Skills 模块配置"""
     enabled: bool = True
-    global_path: str = "~/.zclaw/skills"
-    project_path: str = "skills"  # 相对于项目根目录
+    global_path: str = "~/.agents/skills"
+    project_path: str = ".agents/skills"  # 相对于项目根目录
     auto_load: bool = True
     inject_to_prompt: bool = True
 
@@ -140,6 +140,14 @@ def _get_project_root() -> Path:
     """获取项目根目录（src/ 的上级目录）。"""
     src_dir = Path(__file__).resolve().parent
     return src_dir.parent
+
+
+def _get_zclaw_dir() -> Path:
+    """获取项目级 .Zclaw 目录，必要时创建。"""
+    project_root = Path(__file__).resolve().parent.parent.parent
+    path = project_root / ".Zclaw"
+    path.mkdir(parents=True, exist_ok=True)
+    return path
 
 
 def _find_env_file() -> Path | None:

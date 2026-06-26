@@ -7,7 +7,6 @@ Shell 工具
 from __future__ import annotations
 
 import re
-import shlex
 
 from src.tools.base import BaseTool, DangerLevel, ToolMetadata, ToolParameter, ToolResult
 from src.sandbox.runner import CommandRunner
@@ -35,18 +34,16 @@ class ShellTool(BaseTool):
         timeout = kwargs.get("timeout", 120)
         workdir = kwargs.get("workdir", ".")
 
-        # 危险等级检测（仅提示，不阻止，由权限系统决定）
-        danger = self._detect_danger(command)
-        if danger:
-            self.metadata = ToolMetadata(
-                category="system",
-                danger_level=DangerLevel.DANGEROUS,
-                timeout_seconds=timeout,
-            )
-
         runner = CommandRunner(timeout=timeout, workdir=workdir)
         result = runner.run(command)
         return result
+
+    def get_danger_level(self, arguments: dict | None = None) -> DangerLevel:
+        """根据命令内容判断本次 shell 调用的危险等级。"""
+        command = (arguments or {}).get("command", "")
+        if self._detect_danger(command):
+            return DangerLevel.DANGEROUS
+        return DangerLevel.CONFIRM
 
     def _detect_danger(self, command: str) -> str | None:
         """检测命令是否包含危险模式。"""

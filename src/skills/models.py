@@ -56,7 +56,7 @@ class SkillDefinition:
 
     name: str
     description: str
-    version: str = "0.1.0"
+    version: str = "0.6.1"
     source_path: Path | None = None
     triggers: list[str] = field(default_factory=list)
     requires: SkillRequirements = field(default_factory=SkillRequirements)
@@ -101,7 +101,7 @@ class SkillDefinition:
         # 提取基本信息
         name = frontmatter.get("name", "unknown")
         description = frontmatter.get("description", "")
-        version = frontmatter.get("version", "0.1.0")
+        version = frontmatter.get("version", "0.6.1")
 
         # 提取触发条件
         triggers = []

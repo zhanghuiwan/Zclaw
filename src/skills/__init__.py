@@ -4,7 +4,7 @@ Skills 模块
 Zclaw 的 Agent Skills 支持，遵循 Claude Code / OpenClaw 通用标准。
 
 核心功能:
-- 从 ~/.zclaw/skills/ 和项目 skills/ 目录加载 SKILL.md
+- 从 ~/.agents/skills/ 和项目 .agents/skills/ 目录加载 SKILL.md
 - 根据用户输入自动匹配相关 skills
 - 将 skill 内容注入到 LLM 上下文
 - 执行 skill 定义的操作
@@ -51,4 +51,4 @@ __all__ = [
     "SkillTool",
 ]
 
-__version__ = "0.1.0"
+__version__ = "0.6.1"

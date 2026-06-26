@@ -94,15 +94,14 @@ class REPL:
         # 命令补全器
         commands = [
             "/help", "/clear", "/undo", "/compact", "/usage", "/tools",
-            "/provider", "/model", "/info", "/memory", "/session",
+            "/provider", "/model", "/info", "/session",
             "/plugin", "/cost", "/plan", "/mcp", "/quit", "/exit",
         ]
-        memory_cmds = ["/memory list", "/memory search ", "/memory forget "]
         session_cmds = ["/session save ", "/session load ", "/session delete ", "/session list"]
         mcp_cmds = ["/mcp list", "/mcp connect ", "/mcp disconnect ", "/mcp reconnect "]
         provider_cmds = ["/provider ", "/model "]
         plugin_cmds = ["/plugin reload", "/plugin list"]
-        all_commands = commands + memory_cmds + session_cmds + mcp_cmds + provider_cmds + plugin_cmds
+        all_commands = commands + session_cmds + mcp_cmds + provider_cmds + plugin_cmds
 
         cmd_completer = WordCompleter(all_commands, ignore_case=True, sentence=True)
 
@@ -308,44 +307,6 @@ class REPL:
                     self._renderer.print_error(
                         f"未知的 Provider '{target}'。可用: {available}"
                     )
-        elif cmd == "/memory":
-            if not args:
-                stats = self._agent.memory.get_stats()
-                self._renderer.console.print()
-                self._renderer.console.print("[info]记忆统计:[/]")
-                self._renderer.console.print(f"  总计: {stats['total']}")
-                for mtype, count in stats.get("by_type", {}).items():
-                    self._renderer.console.print(f"  {mtype}: {count}")
-                self._renderer.console.print()
-                self._renderer.print_info("用法: /memory list, /memory search <关键词>, /memory forget <id>")
-            elif args.strip() == "list":
-                memories = self._agent.memory.list_memories()
-                if not memories:
-                    self._renderer.print_info("没有存储的记忆。")
-                else:
-                    for mem in memories[:20]:
-                        self._renderer.console.print(
-                            f"  [{mem.type.value}]{mem.id}[/] {mem.content[:60]}"
-                        )
-            elif args.strip().startswith("search "):
-                query = args.strip()[7:]
-                results = self._agent.memory.recall(query)
-                if not results:
-                    self._renderer.print_info(f"没有匹配的记忆: {query}")
-                else:
-                    for mem in results:
-                        self._renderer.console.print(
-                            f"  [{mem.type.value}]{mem.id}[/] {mem.content[:80]}"
-                        )
-            elif args.strip().startswith("forget "):
-                mem_id = args.strip()[7:]
-                if self._agent.memory.forget(mem_id):
-                    self._renderer.print_success(f"已删除记忆 {mem_id}")
-                else:
-                    self._renderer.print_error(f"未找到记忆: {mem_id}")
-            else:
-                self._renderer.print_warning("用法: /memory [list|search <关键词>|forget <id>]")
-
         elif cmd == "/session":
             if not args:
                 sessions = self._agent.session_manager.list_sessions()
@@ -375,20 +336,8 @@ class REPL:
                 else:
                     # 恢复消息
                     self._agent.loop.clear_history()
-                    from src.llm.models import Message, MessageRole, ToolCall
-                    for m_data in messages:
-                        role = MessageRole(m_data["role"])
-                        tool_calls = None
-                        if m_data.get("tool_calls"):
-                            tool_calls = [
-                                ToolCall(
-                                    id=tc["id"],
-                                    name=tc["name"],
-                                    arguments=tc["arguments"],
-                                )
-                                for tc in m_data["tool_calls"]
-                            ]
-                        msg = Message(role=role, content=m_data["content"], tool_calls=tool_calls)
+                    from src.cli.session import deserialize_messages
+                    for msg in deserialize_messages(messages):
                         self._agent.loop.add_message(msg)
                     self._renderer.print_success(f"会话已加载: {sid} ({len(messages)} 条消息)")
             elif args.strip().startswith("delete "):

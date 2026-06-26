@@ -30,7 +30,7 @@ Zclaw 是一个结合 **Claude Code** 与 **OpenClaw** 思想的 AI 编程助手
 | **持久记忆** | 五层分层架构（L0-L4），Agent 驱动的自主探索，状态与历史分离 |
 | **智能上下文** | 自动检测并压缩长对话，适配不同模型的 token 限制 |
 | **插件扩展** | 用户可通过编写 Python 文件自定义工具 |
-| **完整 CLI** | Rich 渲染的终端交互界面，支持 REPL 模式和单次命令模式 |
+| **默认简易 CLI** | `Zclaw` 与 `python main.py` 共用同一启动实现，支持 REPL 模式和单次命令模式 |
 
 ### 1.3 技术栈
 
@@ -392,7 +392,7 @@ self._tools = ToolRegistry()           # + 注册 28 个内置工具
 self._plugin_loader = PluginLoader()   # + 加载插件工具
 self._permissions = PermissionManager()
 self._audit = AuditLogger()
-self._memory = MemoryManager()
+self._memory = MemoryCoordinator()     # V4 分层记忆 + 记忆工具
 self._context = ContextManager()
 self._planner = Planner()
 self._prompt_builder = PromptBuilder()
@@ -1050,9 +1050,9 @@ FastAPI 应用，支持：
 
 ### 3.14 CLI 界面 (cli)
 
-#### 3.14.1 REPL (`app.py`)
+#### 3.14.1 默认简易 REPL (`simple.py` / `main.py`)
 
-`REPL` 类实现交互式命令循环：
+`Zclaw` console script 指向 `src.cli.simple:main`，根目录 `main.py` 只做薄包装并转发到同一个实现。因此两种启动方式在配置加载、权限策略、交互命令上保持一致。
 
 **支持的命令**:
 
@@ -1060,27 +1060,17 @@ FastAPI 应用，支持：
 |------|------|
 | `/help` | 显示帮助 |
 | `/clear` | 清空对话历史 |
-| `/compact` | 手动压缩上下文 |
 | `/undo` | 撤销上一轮对话 |
-| `/usage` | 显示 token 使用统计 |
-| `/tools` | 列出已注册工具 |
-| `/provider [name]` | 查看/切换 LLM Provider |
-| `/model [name]` | 查看/切换模型 |
-| `/info` | 显示完整配置信息 |
-| `/memory` | 查看/搜索/删除记忆 |
-| `/session save\|load\|delete\|list` | 会话管理 |
-| `/plugin [reload\|list]` | 插件管理 |
-| `/cost` | Token 用量和费用统计 |
-| `/plan [clear]` | 查看/清除当前计划 |
-| `/mcp list\|connect\|disconnect` | MCP 管理 |
+| `/info` | 显示当前配置 |
 | `/quit` `/exit` | 退出 |
 
 **非交互模式**:
 ```bash
+Zclaw -p "列出当前目录的文件"
 python main.py -p "列出当前目录的文件"
 ```
 
-**输入增强**: prompt-toolkit 提供命令历史（`~/.Zclaw/history`）、自动补全、`Ctrl+C` 取消。
+完整 Rich REPL 仍保留在 `src.cli.app`，可通过 `python -m src.cli.app` 启动。
 
 #### 3.14.2 渲染器 (`renderer.py`)
 

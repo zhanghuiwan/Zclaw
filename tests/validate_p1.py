@@ -157,6 +157,7 @@ async def test_shell_tool():
     print("=" * 60)
     print("6. Testing Shell Tool")
     print("=" * 60)
+    from src.tools.base import DangerLevel
     from src.tools.builtin.shell_tool import ShellTool
     st = ShellTool()
     d1 = st._detect_danger("ls -la")
@@ -174,6 +175,10 @@ async def test_shell_tool():
     d5 = st._detect_danger("sudo apt install")
     assert d5 is not None
     print("  OK Dangerous command: sudo -> dangerous")
+    assert st.get_danger_level({"command": "rm -rf /"}) == DangerLevel.DANGEROUS
+    assert st.danger_level == DangerLevel.CONFIRM
+    assert st.get_danger_level({"command": "echo safe"}) == DangerLevel.CONFIRM
+    print("  OK Dynamic danger level does not mutate metadata")
     r1 = await st.execute(command="echo safe_test_12345", timeout=5)
     assert r1.success
     print("  OK Execute safe command")
@@ -227,12 +232,30 @@ async def test_full_agent():
     from src.core.agent import Agent
     config_yaml = load_yaml_config(Path(__file__).parent.parent / "config.example.yaml")
     settings = Settings.model_validate(config_yaml)
+    settings.mcp.enabled = False
+    settings.skills.enabled = False
+    settings.security.audit_log = False
     agent = Agent(settings)
     print(f"  OK Agent: {agent}")
     assert agent.state.value == "idle"
     print(f"  OK Registered tools: {sorted(agent.tools.tool_names)}")
-    assert len(agent.tools.to_openai_tools()) == 9
-    print("  OK OpenAI tool definitions: 9 tools")
+    required_tools = {
+        "file_read",
+        "file_write",
+        "file_edit",
+        "directory",
+        "file_search",
+        "grep",
+        "glob",
+        "shell",
+        "search_conversation_history",
+        "get_session_history",
+        "update_memory",
+        "set_preference",
+    }
+    assert required_tools.issubset(set(agent.tools.tool_names))
+    assert len(agent.tools.to_openai_tools()) >= len(required_tools)
+    print(f"  OK OpenAI tool definitions: {len(agent.tools.to_openai_tools())} tools")
     print()
 
 

@@ -97,6 +97,10 @@ class BaseTool:
     def category(self) -> str:
         return self.metadata.category
 
+    def get_danger_level(self, arguments: dict[str, Any] | None = None) -> DangerLevel:
+        """返回本次调用的危险等级，子类可根据参数动态判断。"""
+        return self.danger_level
+
     async def execute(self, **kwargs) -> ToolResult:
         """
         执行工具逻辑。

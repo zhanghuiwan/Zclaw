@@ -169,10 +169,10 @@ class SkillLoader:
 
     @staticmethod
     def get_default_global_path() -> Path:
-        """获取全局 skill 目录的默认路径 (~/.zclaw/skills)"""
-        return Path.home() / ".zclaw" / "skills"
+        """获取全局 skill 目录的默认路径 (~/.agents/skills)"""
+        return Path.home() / ".agents" / "skills"
 
     @staticmethod
     def get_default_project_path(project_root: Path) -> Path:
-        """获取项目级 skill 目录的默认路径 (project_root/skills)"""
-        return project_root / "skills"
+        """获取项目级 skill 目录的默认路径 (project_root/.agents/skills)"""
+        return project_root / ".agents" / "skills"

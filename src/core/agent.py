@@ -6,6 +6,7 @@ Agent 的入口点和顶层协调器，负责初始化各模块并协调它们�
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from typing import AsyncIterator
 
@@ -188,6 +189,10 @@ class Agent:
 
             # 只覆盖需要从 settings 更新的字段
             skills_config.global_path = Path(settings.skills.global_path).expanduser()
+            configured_project_path = Path(settings.skills.project_path)
+            if not configured_project_path.is_absolute() and not str(configured_project_path).startswith("~"):
+                configured_project_path = project_root / configured_project_path
+            skills_config.project_path = configured_project_path.expanduser()
             skills_config.auto_load = settings.skills.auto_load
             skills_config.inject_to_prompt = settings.skills.inject_to_prompt
 
@@ -337,8 +342,24 @@ class Agent:
         # P8 V4: 归档对话到 L2
         self._memory.archive_turn(role="user", content=user_input)
         self._memory.archive_turn(role="assistant", content=response_content)
-        # P8 V4: 提取并分发记忆
-        await self._memory.extract_and_store(self._loop.messages, self._memory.extractor)
+        # P8 V4: 后台提取并分发记忆，避免流式输出结束后阻塞命令行。
+        self._schedule_memory_extraction(self._loop.messages)
+
+    def _schedule_memory_extraction(self, messages: list) -> asyncio.Task | None:
+        """将记忆提取放到后台执行。"""
+        extractor = self._memory.extractor
+        if extractor is None:
+            return None
+
+        messages_snapshot = list(messages)
+
+        async def _run() -> None:
+            try:
+                await self._memory.extract_and_store(messages_snapshot, extractor)
+            except Exception:
+                logger.exception("后台记忆提取失败")
+
+        return asyncio.create_task(_run())
 
     def _update_memory_context(self, user_input: str) -> None:
         """P8 V4: 构建最小化的 system prompt 上下文（L4/L3/L1，无 L2 自动注入）。"""

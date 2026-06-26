@@ -7,6 +7,7 @@ LLM 数据模型
 from __future__ import annotations
 
 import logging
+import json
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any
@@ -99,6 +100,22 @@ class ToolCall:
     name: str
     arguments: str | dict  # JSON 字符串或字典
 
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> ToolCall:
+        """从会话存档或 OpenAI 风格字典恢复工具调用。"""
+        if "function" in data and isinstance(data["function"], dict):
+            function = data["function"]
+            return cls(
+                id=data.get("id", ""),
+                name=function.get("name", ""),
+                arguments=function.get("arguments", ""),
+            )
+        return cls(
+            id=data.get("id", ""),
+            name=data.get("name", ""),
+            arguments=data.get("arguments", ""),
+        )
+
 
 @dataclass
 class ToolDefinition:
@@ -137,6 +154,23 @@ class Message:
     tool_call_id: str | None = None
     name: str | None = None
 
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> Message:
+        """从保存的会话消息恢复 Message 对象。"""
+        role = data.get("role", MessageRole.USER)
+        if not isinstance(role, MessageRole):
+            role = MessageRole(role)
+        tool_calls = None
+        if data.get("tool_calls"):
+            tool_calls = [ToolCall.from_dict(tc) for tc in data["tool_calls"]]
+        return cls(
+            role=role,
+            content=data.get("content"),
+            tool_calls=tool_calls,
+            tool_call_id=data.get("tool_call_id"),
+            name=data.get("name"),
+        )
+
     def to_openai_dict(self) -> dict[str, Any]:
         d: dict[str, Any] = {"role": self.role.value}
         if self.content is not None:
@@ -148,7 +182,7 @@ class Message:
                     "type": "function",
                     "function": {
                         "name": tc.name,
-                        "arguments": tc.arguments if isinstance(tc.arguments, str) else __import__("json").dumps(tc.arguments),
+                        "arguments": tc.arguments if isinstance(tc.arguments, str) else json.dumps(tc.arguments, ensure_ascii=False),
                     },
                 }
                 for tc in self.tool_calls

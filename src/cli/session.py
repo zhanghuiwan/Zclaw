@@ -10,7 +10,20 @@ import logging
 from pathlib import Path
 from datetime import datetime
 
+from src.llm.models import Message
+
 logger = logging.getLogger(__name__)
+
+
+def deserialize_messages(messages: list[dict | Message]) -> list[Message]:
+    """将会话文件中的消息字典恢复为 Message 对象。"""
+    result = []
+    for msg in messages:
+        if isinstance(msg, Message):
+            result.append(msg)
+        else:
+            result.append(Message.from_dict(msg))
+    return result
 
 
 class SessionManager:

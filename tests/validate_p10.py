@@ -47,7 +47,7 @@ def run_async_test(name, func):
     """运行异步测试。"""
     global passed, failed, errors
     try:
-        asyncio.get_event_loop().run_until_complete(func())
+        asyncio.run(func())
         passed += 1
         print(f"  ✅ {name}")
     except Exception as e:
@@ -279,10 +279,16 @@ def test_server_creation():
     app = create_app()
     assert app is not None
     assert app.title == "Zclaw Web UI"
-    assert app.version == "0.1.0"
+    assert app.version == "0.6.1"
 
     # 检查路由已注册
-    routes = [r.path for r in app.routes]
+    routes = []
+    for route in app.routes:
+        if path := getattr(route, "path", None):
+            routes.append(path)
+        for child in getattr(getattr(route, "original_router", None), "routes", []):
+            if path := getattr(child, "path", None):
+                routes.append(path)
     assert "/api/ws" in routes
     assert "/api/status" in routes
     assert "/api/tools" in routes
@@ -424,6 +430,37 @@ def test_web_config_serialization():
     assert data["web"]["port"] == 8080
 
 
+def test_console_script_uses_simple_entrypoint():
+    """测试 Zclaw 命令和 python main.py 共用简易入口。"""
+    import tomllib
+    import main as root_main
+    from src.cli.simple import main as simple_main
+
+    pyproject = tomllib.loads((PROJECT_ROOT / "pyproject.toml").read_text(encoding="utf-8"))
+    assert pyproject["project"]["scripts"]["Zclaw"] == "src.cli.simple:main"
+    assert root_main.main is simple_main
+
+
+def test_simple_entrypoint_env_resolution():
+    """测试简易入口允许无 .env 时使用环境变量。"""
+    from src.cli.simple import has_required_env_config, resolve_env_path
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        env_file = Path(tmpdir) / ".env"
+        env_file.write_text("ZCLAW_API_KEY=test\n", encoding="utf-8")
+        assert resolve_env_path(str(env_file)) == env_file
+
+    with patch("src.cli.simple._find_env_file", return_value=None), \
+            patch("src.cli.simple.PROJECT_ROOT", Path("/tmp/nonexistent-zclaw-root")):
+        assert resolve_env_path(None) is None
+
+    with patch.dict(os.environ, {"ZCLAW_API_KEY": "test-key"}, clear=True):
+        assert has_required_env_config()
+
+    with patch.dict(os.environ, {}, clear=True):
+        assert not has_required_env_config()
+
+
 # ============================================================
 # Test 6: 路由模块导入和基础功能
 # ============================================================
@@ -440,6 +477,69 @@ def test_routes_ws_manager_singleton():
     from src.web.routes import ws_manager
     from src.web.ws_manager import ConnectionManager
     assert isinstance(ws_manager, ConnectionManager)
+
+
+async def test_routes_web_permission_returns_bool():
+    """测试 Web 权限回调拒绝时返回 False。"""
+    from types import SimpleNamespace
+    from src.web import routes
+
+    request = SimpleNamespace(
+        tool_name="shell",
+        arguments={"command": "echo hi"},
+        danger_level="confirm",
+    )
+    with patch.object(routes.ws_manager, "request_permission", AsyncMock(return_value=False)):
+        result = await routes._request_web_permission("conn", request)
+    assert result is False
+
+    safe_request = SimpleNamespace(
+        tool_name="file_read",
+        arguments={"path": "README.md"},
+        danger_level="safe",
+    )
+    result = await routes._request_web_permission("conn", safe_request)
+    assert result is True
+
+
+async def test_routes_compact_writes_back():
+    """测试 Web compact 会把压缩结果写回 loop。"""
+    from src.web import routes
+
+    agent = MagicMock()
+    agent.loop.messages = ["system", "old", "recent"]
+    agent.context_manager.prepare_messages.return_value = ["system", "summary", "recent"]
+    routes.set_agent(agent)
+
+    with patch.object(routes.ws_manager, "send_json", AsyncMock()) as send_json:
+        await routes._handle_command("conn", {"command": "compact"})
+
+    assert agent.loop._messages == ["system", "summary", "recent"]
+    send_json.assert_awaited()
+
+
+async def test_routes_load_session_deserializes_messages():
+    """测试 Web session load 将 dict 恢复为 Message。"""
+    from src.llm.models import Message
+    from src.web import routes
+
+    agent = MagicMock()
+    agent.session_manager.load.return_value = [
+        {"role": "user", "content": "hello", "tool_calls": []},
+        {
+            "role": "assistant",
+            "content": "",
+            "tool_calls": [{"id": "tc1", "name": "file_read", "arguments": "{\"path\":\"README.md\"}"}],
+        },
+    ]
+    routes.set_agent(agent)
+
+    await routes.load_session("abc")
+
+    assert agent.loop.clear_history.called
+    added = [call.args[0] for call in agent.loop.add_message.call_args_list]
+    assert all(isinstance(msg, Message) for msg in added)
+    assert added[1].tool_calls[0].name == "file_read"
 
 
 # ============================================================
@@ -479,10 +579,15 @@ def main():
     print("\n⚙️  5. 配置集成")
     run_test("WebConfig 在 Settings 中", test_web_config)
     run_test("WebConfig 序列化", test_web_config_serialization)
+    run_test("Zclaw 与 main.py 入口一致", test_console_script_uses_simple_entrypoint)
+    run_test("简易入口环境变量配置", test_simple_entrypoint_env_resolution)
 
     print("\n🛣️  6. 路由模块")
     run_test("路由模块导入", test_routes_import)
     run_test("WS 管理器单例", test_routes_ws_manager_singleton)
+    run_async_test("Web 权限返回 bool", test_routes_web_permission_returns_bool)
+    run_async_test("Web compact 写回", test_routes_compact_writes_back)
+    run_async_test("Web session load 反序列化", test_routes_load_session_deserializes_messages)
 
     # 汇总
     print("\n" + "=" * 60)

@@ -63,7 +63,7 @@ class Renderer:
         banner.append("┌" + "─" * 58 + "┐\n", style="info")
         # 标题
         banner.append("│", style="info")
-        banner.append("  🐾 Zclaw v0.1.0", style="bold cyan")
+        banner.append("  🐾 Zclaw v0.6.1", style="bold cyan")
         banner.append(" " * 33 + "│\n", style="info")
         # 副标题
         banner.append("│", style="info")
@@ -359,7 +359,6 @@ class Renderer:
             ("/provider [name]", "切换 LLM Provider"),
             ("/model [name]", "切换模型"),
             ("/info", "显示当前配置信息"),
-            ("/memory", "记忆管理"),
             ("/session", "会话管理"),
             ("/plugin", "插件管理"),
             ("/mcp", "MCP 服务器管理"),
@@ -501,4 +500,3 @@ class Renderer:
         result = Text()
         result.append(f"`{code}`", style=style)
         return result
-
